@@ -7,7 +7,7 @@
   <link rel="icon" href="data:,">
   <title>钱包库｜MEME 钱包侦查</title>
   <script src="./theme-boot.js?v=20261025-ui"></script>
-  <link rel="stylesheet" href="./app.css?v=20261111-libbm">
+  <link rel="stylesheet" href="./app.css?v=20261112-libtools">
 </head>
 <body data-page="library">
   <nav class="rail" aria-label="主要功能">
@@ -34,8 +34,10 @@
         <label class="field">链<select id="library-chain"><option value="">全部</option><option>Solana</option><option>BSC</option><option>ETH</option><option>Base</option><option>Arbitrum</option><option>Robinhood</option></select></label>
         <label class="field">标签<select id="library-label"><option value="">全部</option></select></label>
         <button class="btn btn-primary" type="submit">搜索</button>
-        <label class="select-wrap lib-quiet-toggle"><input type="checkbox" id="library-show-quiet"> 显示低盈利 的钱包</label>
+        <label class="select-wrap lib-quiet-toggle"><input type="checkbox" id="library-show-quiet"> 显示低盈利的钱包</label>
         <div class="end">
+          <button class="btn btn-ghost" type="button" id="open-gm-refresh">更新盈亏</button>
+          <button class="btn btn-ghost" type="button" id="open-cleanup">清理</button>
           <button class="btn btn-ghost" type="button" id="open-labels">导入私人标签</button>
           <button class="btn btn-ghost" type="button" id="open-platform-export">导出到 DeBot／GMGN</button>
           <button class="btn btn-ghost" type="button" id="library-export">导出 XLSX</button>
@@ -121,10 +123,73 @@
     </div>
   </dialog>
 
+  <dialog class="sheet" id="gm-refresh-dialog" aria-labelledby="gm-refresh-title">
+    <div class="sheet-head"><h2 id="gm-refresh-title">更新盈亏</h2><button type="button" class="btn btn-ghost btn-icon" id="gm-refresh-close" aria-label="关闭"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-body">
+      <p class="sheet-note">用 GMGN 查每个钱包的历史总盈利（全部交易过的币加总，含还没卖的帐面），一次查 100 个。排在聪明钱收集后面慢慢查，不会抢实时信号。查到的数字显示在「累计盈利」下面，也算进总体盈利（低盈利的隐藏、自动清理都会看）。平台用户（FOMO／pump.fun）的 GMGN 数字常常不准，以平台自己算的为准。</p>
+      <div class="sheet-group">
+        <h3>范围</h3>
+        <div class="seg" id="gm-refresh-scope" role="group" aria-label="范围">
+          <button type="button" data-scope="all" aria-pressed="true">全部钱包</button>
+          <button type="button" data-scope="search" aria-pressed="false">目前搜索结果</button>
+        </div>
+        <p class="sheet-note" id="gm-refresh-scope-note"></p>
+      </div>
+      <label class="select-wrap"><input type="checkbox" id="gm-refresh-skip" checked> 6 小时内更新过的跳过</label>
+      <div class="bar" id="gm-refresh-bar" hidden><span></span></div>
+      <div class="sheet-actions">
+        <button class="btn btn-primary" type="button" id="gm-refresh-start">开始更新</button>
+        <button class="btn btn-ghost" type="button" id="gm-refresh-stop" hidden>停止</button>
+      </div>
+      <p class="sheet-note" id="gm-refresh-status" role="status" aria-live="polite"></p>
+    </div>
+  </dialog>
+
+  <dialog class="sheet sheet-wide" id="cleanup-dialog" aria-labelledby="cleanup-title">
+    <div class="sheet-head"><h2 id="cleanup-title">清理钱包库</h2><button type="button" class="btn btn-ghost btn-icon" id="cleanup-close" aria-label="关闭"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-body">
+      <p class="sheet-note">删掉总体盈利不到门槛的钱包。总体盈利＝库里每颗币的盈亏加总、GMGN 30 天已实现、GMGN 历史总盈利、平台战绩，有数据的取最高。先按「预览」：会先替这些钱包更新 GMGN 历史总盈利，再列出要删哪些；按「删除」才会删。删之前先封存，可以还原；资金关联、平台名字、私人标签不会删。每天的自动清理（规则见钱包库「低盈利（自动清理）」那一条）照旧。</p>
+      <div class="sheet-group">
+        <h3>总体盈利不到</h3>
+        <div class="seg seg-wrap" id="cleanup-threshold" role="group" aria-label="门槛">
+          <button type="button" data-threshold="0" aria-pressed="false">$0（只删亏钱的）</button>
+          <button type="button" data-threshold="1000" aria-pressed="false">$1K</button>
+          <button type="button" data-threshold="2000" aria-pressed="true">$2K</button>
+          <button type="button" data-threshold="10000" aria-pressed="false">$10K</button>
+          <button type="button" data-threshold="custom" aria-pressed="false">自订</button>
+        </div>
+        <label class="field" id="cleanup-custom-wrap" hidden>自订门槛（美元，可以填负数，例如 -1000＝亏超过 $1K 才删）<input id="cleanup-custom" type="number" step="100" inputmode="decimal"></label>
+      </div>
+      <div class="sheet-group">
+        <h3>链</h3>
+        <div class="seg" id="cleanup-scope" role="group" aria-label="链">
+          <button type="button" data-scope="" aria-pressed="true">全部</button>
+          <button type="button" data-scope="Solana" aria-pressed="false">Solana</button>
+          <button type="button" data-scope="EVM" aria-pressed="false">BSC／Robinhood</button>
+        </div>
+        <p class="sheet-note">同一个 0x 地址在 BSC、Robinhood 是同一个钱包，要删就两边一起删。</p>
+      </div>
+      <div class="sheet-group">
+        <h3>另外</h3>
+        <label class="select-wrap"><input type="checkbox" id="cleanup-young" checked> 进库还不满自动清理天数的也删</label>
+        <label class="select-wrap"><input type="checkbox" id="cleanup-platform"> FOMO／pump.fun 用户也一起看（预设不删；pump.fun 用户算过帐号总盈亏的以它为准；删掉的之后绑名字也不会自动加回）</label>
+        <p class="sheet-note">照样不删：你标过的（手动标签、移除过的标签、备注、私人标签、确认相关）、聪明钱追踪中（★）、要避开的（疑似庄家/内部、捆绑、狙击）、早买金狗那几条。</p>
+      </div>
+      <div class="bar" id="cleanup-bar" hidden><span></span></div>
+      <div class="sheet-actions">
+        <button class="btn btn-primary" type="button" id="cleanup-preview">预览</button>
+        <button class="btn btn-ghost" type="button" id="cleanup-stop" hidden>停止</button>
+        <button class="btn btn-danger" type="button" id="cleanup-apply" hidden>删除</button>
+      </div>
+      <p class="sheet-note" id="cleanup-status" role="status" aria-live="polite"></p>
+      <div id="cleanup-result"></div>
+    </div>
+  </dialog>
+
   <script src="./jszip.min.js?v=3.10.1"></script>
   <script src="./shell.js?v=20261111-card"></script>
-  <script src="./wallet-investigator.js?v=20261111-relay"></script>
+  <script src="./wallet-investigator.js?v=20261112-libtools"></script>
   <script src="./bookmarklet.js?v=20261112-fboard"></script>
-  <script src="./library-page.js?v=20261111-libbm"></script>
+  <script src="./library-page.js?v=20261112-libtools"></script>
 </body>
 </html>

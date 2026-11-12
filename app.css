@@ -1345,3 +1345,7 @@ body[data-tab="review"] #window-seg, body[data-tab="review"] #filter-btn { displ
 .lib-bm-text small { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .lib-bm-more { flex: 1 1 300px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
 .lib-bm-more .bm-link { margin: 0 2px; }
+
+dialog.sheet.sheet-wide { width: min(880px, calc(100vw - 28px)); }
+.cleanup-table { max-height: 420px; overflow: auto; }
+.lib-toolbar .end { flex-wrap: wrap; }

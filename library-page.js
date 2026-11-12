@@ -230,11 +230,79 @@ function pumpSyncProgressText(r) {
   return `${head}，还有 ${due} 位要算。`;
 }
 
+
+const BULK_SRC = { coin: "库内币加总", pnl30: "GMGN 30 天已实现", gm: "GMGN 历史总盈利", pf: "平台战绩", acct: "pump.fun 帐号" };
+const BULK_CHAIN = { Solana: "SOL", BSC: "BSC", Robinhood: "RH" };
+function bulkDuration(sec) {
+  const s = Math.max(0, Math.round(Number(sec) || 0));
+  if (s < 60) return `${s} 秒`;
+  const m = Math.round(s / 60);
+  return m < 60 ? `${m} 分钟` : `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+}
+function gmRefreshEstimate(n) {
+  const batches = Math.ceil((Number(n) || 0) / 100);
+  return { batches, text: batches ? `约 ${batches} 批、${bulkDuration(batches * 10)}左右（看聪明钱收集忙不忙）` : "" };
+}
+function gmRefreshText(job) {
+  if (!job || !job.kind) return "";
+  const n = (v) => Number(v) || 0;
+  if (job.running) {
+    if (job.phase === "check") return "算符合的钱包中…";
+    if (job.phase === "compute") return "整理结果中…";
+    if (job.phase !== "refresh") return "准备中…";
+    const head = job.kind === "preview" ? "先更新这些钱包的 GMGN 历史总盈利" : "更新中";
+    return `${head}：${n(job.done)}／${n(job.total)} 个（第 ${Math.min(n(job.batchDone) + 1, n(job.batches))}／${n(job.batches)} 批）`
+      + `${job.eta ? `，约剩 ${bulkDuration(job.eta)}` : ""}${job.note ? `；${job.note}` : ""}`;
+  }
+  const parts = [];
+  if (job.kind === "refresh") {
+    parts.push(`${job.stopped ? "已停止" : "更新好了"}：查到 ${n(job.updated)} 个、GMGN 没有纪录 ${n(job.noData)} 个`
+      + `${n(job.failed) ? `、${n(job.failed)} 个 GMGN 出错没更新到` : ""}`
+      + `${job.stopped ? `、${Math.max(0, n(job.total) - n(job.done))} 个还没查` : ""}`);
+    if (n(job.skipped)) parts.push(`${n(job.skipped)} 个 6 小时内更新过，跳过`);
+    if (n(job.unsupported)) parts.push(`${n(job.unsupported)} 个在 GMGN 查不了的链`);
+  }
+  if (job.error) parts.push(`出错：${job.error}`);
+  if (job.lastError && n(job.failed)) parts.push(`GMGN 最后一次错误：${job.lastError}`);
+  return parts.length ? `${parts.join("；")}。` : "";
+}
+function cleanupSummary(r) {
+  if (!r) return "";
+  const n = (v) => Number(v) || 0;
+  const by = Object.entries(r.byChain || {}).map(([k, v]) => `${k} ${v}`).join("、");
+  const lines = [];
+  lines.push(r.count ? `符合的有 ${r.count} 个钱包${by ? `（${by}）` : ""}${n(r.young) ? `，其中 ${n(r.young)} 个进库不到 ${n(r.days)} 天` : ""}${n(r.platformRows) ? `、${n(r.platformRows)} 个是平台用户` : ""}。`
+    : "没有符合的钱包，不用删。");
+  const names = r.keepNames || {};
+  const kept = Object.entries(r.kept || {}).filter(([, v]) => n(v)).map(([k, v]) => `${names[k] || k} ${v}`);
+  if (kept.length) lines.push(`不到门槛但照样留着：${kept.join("、")}。`);
+  const other = [];
+  if (n(r.noData)) other.push(`${n(r.noData)} 个没有任何盈利数据（追资金来源或手动加的），不删`);
+  if (n(r.youngSkipped)) other.push(`${n(r.youngSkipped)} 个进库不到 ${n(r.days)} 天，这次不删`);
+  if (n(r.notRefreshed)) other.push(`${n(r.notRefreshed)} 个 GMGN 出错没更新到，这次不删`);
+  if (other.length) lines.push(`另外 ${other.join("；")}。`);
+  return lines.join("");
+}
+function cleanupChains(chains) {
+  return (chains || []).map((c) => BULK_CHAIN[c] || c).join("＋");
+}
+function cleanupDetail(row) {
+  return ["coin", "pnl30", "gm", "pf", "acct"].filter((k) => row[k] != null && k !== row.src)
+    .map((k) => `${BULK_SRC[k]} ${typeof formatUsd === "function" ? formatUsd(row[k]) : row[k]}`).join("、");
+}
+function cleanupAppliedText(res) {
+  if (!res) return "";
+  const n = (v) => Number(v) || 0;
+  const head = n(res.deleted) ? `已删 ${n(res.deleted)} 个钱包（${n(res.wallets)} 笔，BSC／RH 同地址两边一起算），封存在 library-archive\\${res.archive}，可以还原。`
+    : "没有删任何钱包。";
+  return head + (n(res.changed) ? `${n(res.changed)} 个预览后有变（你标了、或盈利更新后过了门槛），没删。` : "");
+}
+
 if (typeof module === "object" && module.exports) {
   module.exports = { EXPORT_LABEL_SHORT, EXPORT_SKIP, EXPORT_DROPS, EXPORT_DEFAULT_DROPS, exportMoney, platformExportRemark, strengthExportRemark,
     walletExportRemark, libraryExportItems, libraryExportText, libraryExportCounts, platformExportText, platformExportCounts, botExportNote,
     exportSelection, exportDefaultSelection, exportPickHit, exportDropHit, EXPORT_PLAT_TIERS, platformProfit, platformProfitStats, acctTotal,
-    pumpSyncProgressText };
+    pumpSyncProgressText, bulkDuration, gmRefreshEstimate, gmRefreshText, cleanupSummary, cleanupChains, cleanupDetail, cleanupAppliedText, BULK_SRC };
 }
 
 if (typeof document !== "undefined") {
@@ -515,6 +583,169 @@ if (typeof document !== "undefined") {
       const name = FORMAT_NAME[state.format];
       status.textContent = ok ? `已拷贝 ${state.chain} ${count} 个（${name} 格式），到 ${name} 的导入框粘贴。` : "浏览器拒绝拷贝，请在上面的框里全选后手动拷贝。";
       if (ok) showToast(`已拷贝 ${count} 个钱包备注（${name}）`);
+    });
+  })();
+  (() => {
+    const byId = (id) => document.getElementById(id);
+    const R = { dlg: byId("gm-refresh-dialog"), scope: byId("gm-refresh-scope"), scopeNote: byId("gm-refresh-scope-note"), skip: byId("gm-refresh-skip"),
+      bar: byId("gm-refresh-bar"), start: byId("gm-refresh-start"), stop: byId("gm-refresh-stop"), status: byId("gm-refresh-status") };
+    const C = { dlg: byId("cleanup-dialog"), threshold: byId("cleanup-threshold"), customWrap: byId("cleanup-custom-wrap"), custom: byId("cleanup-custom"),
+      scope: byId("cleanup-scope"), young: byId("cleanup-young"), platform: byId("cleanup-platform"), bar: byId("cleanup-bar"),
+      preview: byId("cleanup-preview"), stop: byId("cleanup-stop"), apply: byId("cleanup-apply"), status: byId("cleanup-status"), result: byId("cleanup-result") };
+    if (!R.dlg || !C.dlg) return;
+    const st = { job: null, library: null, last: null, timer: 0, wasRunning: false, refreshScope: "all", threshold: "2000", cleanupScope: "", armed: 0, shownId: "" };
+    const press = (seg, attr, value) => seg.querySelectorAll(`button[${attr}]`).forEach((b) => b.setAttribute("aria-pressed", String(b.getAttribute(attr) === value)));
+    const setBar = (bar, job) => {
+      const on = Boolean(job && job.running && job.phase === "refresh" && job.total);
+      bar.hidden = !on;
+      if (on) bar.firstElementChild.style.width = `${Math.round((Number(job.done) || 0) / job.total * 100)}%`;
+    };
+    const filters = () => ({ q: byId("library-q")?.value.trim() || "", chain: byId("library-chain")?.value || "", label: byId("library-label")?.value || "",
+      showQuiet: Boolean(byId("library-show-quiet")?.checked) });
+
+    function renderRefresh() {
+      const job = st.job || {};
+      const mine = job.kind === "refresh";
+      const busy = Boolean(job.running);
+      const lib = st.library || {};
+      const total = st.refreshScope === "all" ? Number(lib.wallets) || 0 : Number(libraryState.total) || 0;
+      const est = gmRefreshEstimate(total);
+      R.scopeNote.textContent = st.refreshScope === "all"
+        ? `全部 ${total.toLocaleString()} 个钱包（含隐藏的），已查过 ${Number(lib.gmDone || 0).toLocaleString()} 个；${est.text}。`
+        : `照你现在的搜索、链、标签，${total.toLocaleString()} 个钱包${byId("library-show-quiet")?.checked ? "" : "（没勾「显示低盈利」，不含隐藏的）"}；${est.text}。`;
+      R.start.disabled = busy || !total;
+      R.stop.hidden = !(busy && mine);
+      setBar(R.bar, mine ? job : null);
+      R.status.textContent = busy && !mine ? "清理预览正在跑，等它跑完再更新。" : mine ? gmRefreshText(job) : "";
+    }
+
+    function cleanupParams() {
+      const t = st.threshold === "custom" ? C.custom.value.trim() : st.threshold;
+      return { threshold: t === "" ? NaN : Number(t), scope: st.cleanupScope, young: C.young.checked, platform: C.platform.checked };
+    }
+
+    function renderCleanupRows(r) {
+      if (!r || !r.rows || !r.rows.length) { C.result.replaceChildren(); return; }
+      const more = r.count > r.rows.length ? `<p class="sheet-note">照总体盈利由低到高列前 ${r.rows.length} 个，还有 ${r.count - r.rows.length} 个没列出；按删除会删全部 ${r.count} 个。</p>` : "";
+      C.result.innerHTML = `<div class="compact-table cleanup-table"><table><thead><tr><th>链</th><th>钱包</th><th>总体盈利</th><th>其他数字</th><th>进库</th></tr></thead><tbody>${
+        r.rows.map((row) => `<tr><td data-label="链">${escapeHtml(cleanupChains(row.chains))}</td>
+          <td data-label="钱包">${plainAddressCell(row.address)}${row.names.length ? `<small>${escapeHtml(row.names.join("、"))}</small>` : ""}</td>
+          <td data-label="总体盈利"><strong class="${pnlClass(row.best)}">${formatUsd(row.best)}</strong><small>${escapeHtml(BULK_SRC[row.src] || row.src)}</small></td>
+          <td data-label="其他数字">${escapeHtml(cleanupDetail(row)) || "--"}</td>
+          <td data-label="进库">${row.firstSeen ? libraryDay(row.firstSeen) : "--"}</td></tr>`).join("")}</tbody></table></div>${more}`;
+    }
+
+    function renderCleanup() {
+      const job = st.job || {};
+      const mine = job.kind === "preview";
+      const busy = Boolean(job.running);
+      const p = cleanupParams();
+      C.customWrap.hidden = st.threshold !== "custom";
+      C.preview.disabled = busy || !Number.isFinite(p.threshold);
+      C.stop.hidden = !(busy && mine);
+      setBar(C.bar, mine ? job : null);
+      const r = mine && !busy ? job.result : null;
+      const applied = mine && job.applied;
+      if (busy && !mine) C.status.textContent = "更新盈亏正在跑，等它跑完再预览。";
+      else if (busy) C.status.textContent = gmRefreshText(job);
+      else if (applied) C.status.textContent = cleanupAppliedText(job.applied);
+      else if (r) C.status.textContent = cleanupSummary(r) + (r.count ? `门槛：总体盈利不到 ${formatUsd(r.params.threshold)}。` : "");
+      else if (mine) C.status.textContent = gmRefreshText(job);
+      else C.status.textContent = st.last && st.last.at ? `上次手动清理 ${formatLocalTime(st.last.at * 1000)}：${cleanupAppliedText(st.last)}` : "";
+      const canApply = Boolean(r && r.count && !applied);
+      C.apply.hidden = !canApply;
+      if (canApply && !st.armed) C.apply.textContent = `删除这 ${r.count} 个钱包`;
+      const id = r && !applied ? r.id : "";
+      if (id !== st.shownId) { st.shownId = id; renderCleanupRows(r); }
+      if (applied) C.result.replaceChildren();
+    }
+
+    function render() { renderRefresh(); renderCleanup(); }
+
+    async function poll() {
+      clearTimeout(st.timer);
+      try {
+        const data = await libraryPost("/api/library-bulk/status", {});
+        st.job = data.job; st.library = data.library; st.last = data.lastCleanup;
+      } catch (error) {
+        R.status.textContent = C.status.textContent = `读不到进度：${error.message}`;
+      }
+      const running = Boolean(st.job && st.job.running);
+      if (st.wasRunning && !running && typeof loadLibrary === "function") loadLibrary();
+      st.wasRunning = running;
+      render();
+      if (running || R.dlg.open || C.dlg.open) st.timer = setTimeout(poll, 1500);
+    }
+
+    async function post(path, body, out) {
+      try {
+        const data = await libraryPost(path, body);
+        if (data.job) st.job = data.job;
+        return data;
+      } catch (error) {
+        out.textContent = error.message;
+        return null;
+      } finally {
+        poll();
+      }
+    }
+
+    byId("open-gm-refresh")?.addEventListener("click", () => { if (!R.dlg.open) R.dlg.showModal(); poll(); });
+    byId("open-cleanup")?.addEventListener("click", () => { if (!C.dlg.open) C.dlg.showModal(); poll(); });
+    byId("gm-refresh-close")?.addEventListener("click", () => R.dlg.close());
+    byId("cleanup-close")?.addEventListener("click", () => C.dlg.close());
+    for (const d of [R.dlg, C.dlg]) d.addEventListener("click", (event) => { if (event.target === d) d.close(); });
+    R.scope.addEventListener("click", (event) => {
+      const b = event.target.closest("button[data-scope]");
+      if (!b) return;
+      st.refreshScope = b.dataset.scope;
+      press(R.scope, "data-scope", st.refreshScope);
+      render();
+    });
+    R.start.addEventListener("click", async () => {
+      R.start.disabled = true;
+      await post("/api/library-bulk/refresh", { scope: st.refreshScope, skipHours: R.skip.checked ? 6 : 0, filters: filters() }, R.status);
+    });
+    R.stop.addEventListener("click", () => post("/api/library-bulk/stop", {}, R.status));
+    C.threshold.addEventListener("click", (event) => {
+      const b = event.target.closest("button[data-threshold]");
+      if (!b) return;
+      st.threshold = b.dataset.threshold;
+      press(C.threshold, "data-threshold", st.threshold);
+      if (st.threshold === "custom") C.custom.focus();
+      render();
+    });
+    C.scope.addEventListener("click", (event) => {
+      const b = event.target.closest("button[data-scope]");
+      if (!b) return;
+      st.cleanupScope = b.dataset.scope;
+      press(C.scope, "data-scope", st.cleanupScope);
+      render();
+    });
+    C.custom.addEventListener("input", render);
+    C.preview.addEventListener("click", async () => {
+      const p = cleanupParams();
+      if (!Number.isFinite(p.threshold)) { C.status.textContent = "门槛要填数字（美元）。"; return; }
+      C.preview.disabled = true;
+      st.armed = 0;
+      await post("/api/library-bulk/preview", p, C.status);
+    });
+    C.stop.addEventListener("click", () => post("/api/library-bulk/stop", {}, C.status));
+    C.apply.addEventListener("click", async () => {
+      const r = st.job && st.job.result;
+      if (!r || !r.id) return;
+      if (!st.armed || Date.now() - st.armed > 6000) {
+        st.armed = Date.now();
+        C.apply.textContent = `再按一次确认删除 ${r.count} 个`;
+        setTimeout(() => { if (st.armed && Date.now() - st.armed >= 6000) { st.armed = 0; render(); } }, 6100);
+        return;
+      }
+      st.armed = 0;
+      C.apply.disabled = true;
+      const res = await post("/api/library-bulk/apply", { id: r.id }, C.status);
+      C.apply.disabled = false;
+      if (res && typeof showToast === "function") showToast(res.deleted ? `已删 ${res.deleted} 个钱包（已封存，可以还原）` : "没有删任何钱包");
+      if (res && typeof loadLibrary === "function") loadLibrary();
     });
   })();
 }

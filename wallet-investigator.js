@@ -3288,7 +3288,7 @@ function renderLibraryQuiet(quiet, bots) {
   if (!botNote && (!quiet || (!quiet.total && !quiet.last && !quiet.error))) { box.hidden = true; return; }
   quiet = quiet || {};
   const parts = [];
-  if (quiet.shown) parts.push(`正在显示低盈利 的钱包（标成「低盈利」），全库共 ${quiet.total} 个。`);
+  if (quiet.shown) parts.push(`正在显示低盈利的钱包（标成「低盈利」），全库共 ${quiet.total} 个。`);
   else if (quiet.hidden) parts.push(`已隐藏 ${quiet.hidden} 个总体盈利未达门槛 的钱包，<a href="#" role="button" id="library-quiet-show">显示</a>。`);
   if (quiet.total) parts.push(`进库满 ${quiet.days} 天还是未达门槛 会先封存再删${quiet.nextDueAt ? `，最早一批约 ${libraryDay(quiet.nextDueAt)} 到期` : ""}；想留的加个标签或备注就不会清。`);
   if (quiet.waitingStats) parts.push(`${quiet.waitingStats} 个已到期，等补查完 GMGN 30 天统计才会清。`);
@@ -3305,14 +3305,22 @@ function renderLibraryQuiet(quiet, bots) {
   }
 }
 
+function libraryGmLine(item) {
+  const g = item && item.gm;
+  if (!g || !g.at) return "";
+  if (g.total == null) return `<small>GMGN 历史总盈利：${escapeHtml(g.note || "没有纪录")}（${libraryDay(g.at)} 查）</small>`;
+  return `<small>GMGN 历史总盈利 <span class="${pnlClass(g.total)}">${formatUsd(g.total)}</span>（${libraryDay(g.at)} 更新）</small>`;
+}
+
 function libraryPnlCell(item) {
   const lib = formatUsd(item.totalPnl);
-  if (!(item.platforms || []).some((p) => p.platform === "pump.fun")) return lib;
+  const gm = libraryGmLine(item);
+  if (!(item.platforms || []).some((p) => p.platform === "pump.fun")) return lib + gm;
   const a = item.acct && item.acct["pump.fun"];
   if (a && a.at && a.total != null) {
-    return `<strong class="${pnlClass(a.total)}">${formatUsd(a.total)}</strong><small>pump.fun 帐号总盈亏（${formatNumber(a.coins, 0)} 颗币，${libraryDay(a.at)} 更新）</small><small>库内 ${formatNumber(item.caCount, 0)} 颗加总 ${lib}</small>`;
+    return `<strong class="${pnlClass(a.total)}">${formatUsd(a.total)}</strong><small>pump.fun 帐号总盈亏（${formatNumber(a.coins, 0)} 颗币，${libraryDay(a.at)} 更新）</small><small>库内 ${formatNumber(item.caCount, 0)} 颗加总 ${lib}</small>${gm}`;
   }
-  return `${lib}<small>${a && a.tried ? "pump.fun 帐号没算成功" : "pump.fun 帐号还没算"}，这是库内几颗加总</small>`;
+  return `${lib}<small>${a && a.tried ? "pump.fun 帐号没算成功" : "pump.fun 帐号还没算"}，这是库内几颗加总</small>${gm}`;
 }
 
 async function loadLibrary() {
@@ -3382,6 +3390,7 @@ async function openLibraryWallet(chain, address) {
       ${pumpAcctHtml()}
       ${w.gmgnOk === false ? `<p class="muted"><strong>GMGN 只看到这个人的转入转出（标了 transfer_in 或没有买进纪录），下面 GMGN 的数字不准，只供参考，导出备注也不写。</strong></p>` : ""}` : ""}
       ${w.pnl30 ? `<p class="muted">GMGN 30 天：${w.pnl30.note ? escapeHtml(w.pnl30.note) : `已实现 ${formatUsd(w.pnl30.realized)}${w.pnl30.winrate == null ? "" : `、胜率 ${formatNumber(w.pnl30.winrate * 100, 0)}%`}${w.pnl30.tokens == null ? "" : `、交易 ${formatNumber(w.pnl30.tokens, 0)} 颗币`}`}（查于 ${formatLocalTime(w.pnl30.at * 1000)}）</p>` : ""}
+      ${w.gm ? `<p class="muted">GMGN 历史总盈利（钱包库「更新盈亏」查的）：${w.gm.total == null ? escapeHtml(w.gm.note || "没有纪录") : `${formatUsd(w.gm.total)}${w.gm.realized == null ? "" : `，已实现 ${formatUsd(w.gm.realized)}`}${w.gm.buys == null ? "" : `，买 ${formatNumber(w.gm.buys, 0)} 次、卖 ${formatNumber(w.gm.sells, 0)} 次`}`}（查于 ${formatLocalTime(w.gm.at * 1000)}）</p>` : ""}
       ${w.pf ? `<p class="muted">GMGN 历史战绩：${w.pf.note ? escapeHtml(w.pf.note) : [
         w.pf.total == null ? "" : `总盈利 ${formatUsd(w.pf.total)}`, w.pf.realized == null ? "" : `已实现 ${formatUsd(w.pf.realized)}`,
         w.pf.buys == null ? "" : `买 ${formatNumber(w.pf.buys, 0)} 次、卖 ${formatNumber(w.pf.sells, 0)} 次`,

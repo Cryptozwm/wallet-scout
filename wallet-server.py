@@ -25,6 +25,7 @@ import platform_match
 import smart_money
 import ext_api
 import fomo_board
+import library_bulk
 from oss_config import DATA_DIR
 
 
@@ -1413,7 +1414,7 @@ class WalletHandler(SimpleHTTPRequestHandler):
         super().do_GET()
 
     def do_POST(self) -> None:
-        if self.path not in {"/api/gmgn/token", "/api/gmgn/wallet", "/api/gmgn/identity", "/api/explorer", "/api/relay/requests", "/api/solana-rpc", "/api/evm-rpc", "/api/dexscreener/pairs", "/api/binance/positions", "/api/binance/prices", "/api/defillama/block", "/api/credentials", "/api/library/ingest", "/api/library/trace-ingest", "/api/nodereal/transfers", "/api/library/search", "/api/library/wallet", "/api/library/token-summary", "/api/library/update", "/api/library/link-review", "/api/library/link-reviews", "/api/library/export", "/api/analyze/quick", "/api/library/user-labels/import", "/api/library/user-labels/export", "/api/library/user-labels/lookup", "/api/match/platform-users", "/api/pump/sync-import", "/api/pump/board-import"} and self.path not in smart_money.PATHS and self.path not in ext_api.PATHS and self.path not in fomo_board.PATHS:
+        if self.path not in {"/api/gmgn/token", "/api/gmgn/wallet", "/api/gmgn/identity", "/api/explorer", "/api/relay/requests", "/api/solana-rpc", "/api/evm-rpc", "/api/dexscreener/pairs", "/api/binance/positions", "/api/binance/prices", "/api/defillama/block", "/api/credentials", "/api/library/ingest", "/api/library/trace-ingest", "/api/nodereal/transfers", "/api/library/search", "/api/library/wallet", "/api/library/token-summary", "/api/library/update", "/api/library/link-review", "/api/library/link-reviews", "/api/library/export", "/api/analyze/quick", "/api/library/user-labels/import", "/api/library/user-labels/export", "/api/library/user-labels/lookup", "/api/match/platform-users", "/api/pump/sync-import", "/api/pump/board-import"} and self.path not in smart_money.PATHS and self.path not in ext_api.PATHS and self.path not in fomo_board.PATHS and self.path not in library_bulk.PATHS:
             self.send_json({"ok": False, "error": "找不到此 API"}, HTTPStatus.NOT_FOUND)
             return
         try:
@@ -1435,6 +1436,12 @@ class WalletHandler(SimpleHTTPRequestHandler):
                     self.send_json({"ok": False, "error": "只收这台本机服务自己页面送来的数据"}, HTTPStatus.FORBIDDEN)
                     return
                 self.send_json(fomo_board.handle(self.path, payload if isinstance(payload, dict) else {}))
+                return
+            if self.path in library_bulk.PATHS:
+                if not self.same_origin():
+                    self.send_json({"ok": False, "error": "只收这台本机服务自己页面送来的数据"}, HTTPStatus.FORBIDDEN)
+                    return
+                self.send_json(library_bulk.handle(self.path, payload if isinstance(payload, dict) else {}))
                 return
             if self.path == "/api/credentials":
                 changes: dict[str, str | None] = {}

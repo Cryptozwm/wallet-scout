@@ -115,7 +115,7 @@ PLAT_RULE = "平台用户的盈亏以 FOMO／pump.fun 自己算的为准；平�
 LABELS_VERSION = "1"
 KEEP_LABELS = {"insider", "bundle_member", "sniper", "fomo_user", "pump_user", "gold_regular", "fresh_gold", "top_seller", "diamond", "paper_gold"}
 KEEP_GMGN_TAGS = {"sniper", *INSIDER_TAGS}
-QUIET_RULE = (f"总体盈利不到 ${QUIET_PNL_USD:,} 就不留：库里每颗币的盈亏加总、FOMO／pump.fun 平台战绩、GMGN 30 天已实现盈利，三个都不到 ${QUIET_PNL_USD:,}"
+QUIET_RULE = (f"总体盈利不到 ${QUIET_PNL_USD:,} 就不留：库里每颗币的盈亏加总、FOMO／pump.fun 平台战绩、GMGN 30 天已实现盈利、GMGN 历史总盈利（按「更新盈亏」查过的），四个都不到 ${QUIET_PNL_USD:,}"
               f"（同一个 0x 地址在 BSC、Robinhood 合起来算）。"
               f"例外照样留：你标过的（手动标签、移除过的标签、备注、私人标签、确认相关）、聪明钱追踪中、"
               f"要避开的（疑似庄家/内部、捆绑成员、狙击手）、FOMO／pump.fun 用户、早买金狗那几条。"
@@ -161,6 +161,11 @@ CREATE TABLE IF NOT EXISTS bot_wallets (
   chain TEXT NOT NULL, address TEXT NOT NULL, reason TEXT DEFAULT '', at INTEGER,
   PRIMARY KEY (chain, address)
 );
+-- 手动「清理」删掉的钱包：绑平台名字时不会自动加回钱包库；从封存文件还原就移出这份名单
+CREATE TABLE IF NOT EXISTS lib_removed (
+  chain TEXT NOT NULL, address TEXT NOT NULL, at INTEGER, archive TEXT DEFAULT '',
+  PRIMARY KEY (chain, address)
+);
 CREATE TABLE IF NOT EXISTS link_reviews (
   chain TEXT NOT NULL, address TEXT NOT NULL, target TEXT NOT NULL, kind TEXT NOT NULL, label TEXT DEFAULT '',
   verdict TEXT NOT NULL, tag TEXT DEFAULT '', at INTEGER,
@@ -203,7 +208,8 @@ MIGRATIONS: dict[str, dict[str, str]] = {
                 "pf_total": "REAL", "pf_realized": "REAL", "pf_buys": "INTEGER", "pf_sells": "INTEGER", "pf_best_symbol": "TEXT DEFAULT ''",
                 "pf_best_ca": "TEXT DEFAULT ''", "pf_best_profit": "REAL", "pf_at": "INTEGER", "pf_tries": "INTEGER DEFAULT 0", "pf_note": "TEXT DEFAULT ''",
                 "pnl30_buys": "INTEGER", "pnl30_sells": "INTEGER", "bot_tries": "INTEGER DEFAULT 0",
-                "pnl30_raw": "TEXT DEFAULT ''"},
+                "pnl30_raw": "TEXT DEFAULT ''",
+                "gm_total": "REAL", "gm_realized": "REAL", "gm_buys": "INTEGER", "gm_sells": "INTEGER", "gm_at": "INTEGER", "gm_note": "TEXT DEFAULT ''"},
     "appearances": {"sold_pct": "REAL", "plat_pnl": "REAL", "plat_realized": "REAL", "plat_cost": "REAL",
                     "plat_src": "TEXT DEFAULT ''", "plat_at": "INTEGER"},
     "tokens": {"ath_mc": "REAL", "launch_ts": "INTEGER", "supply": "REAL", "info_at": "INTEGER", "backfill_at": "INTEGER",
@@ -724,6 +730,8 @@ def wallet_summary(row: sqlite3.Row, platforms: list[dict[str, Any]] | None = No
         "pf": {"total": row["pf_total"], "realized": row["pf_realized"], "buys": row["pf_buys"], "sells": row["pf_sells"],
                "bestSymbol": row["pf_best_symbol"] or "", "bestCa": row["pf_best_ca"] or "", "bestProfit": row["pf_best_profit"],
                "at": row["pf_at"], "note": row["pf_note"] or ""} if row["pf_at"] else None,
+        "gm": {"total": row["gm_total"], "realized": row["gm_realized"], "buys": row["gm_buys"], "sells": row["gm_sells"],
+               "at": row["gm_at"], "note": row["gm_note"] or ""} if "gm_at" in row.keys() and row["gm_at"] else None,
     }
 
 
@@ -938,6 +946,8 @@ def search(payload: dict[str, Any]) -> dict[str, Any]:
                     app = here_apps.get(row["address"])
                     summary["here"] = token_here(app, here_token, summary["platforms"], row["created_at"], summary["labels"], token_ca) if app else None
                 items.append(summary)
+            if payload.get("keysOnly"):
+                return {"ok": True, "keys": [[i["chain"], i["address"]] for i in items], "hidden": hidden}
             tokens = conn.execute("SELECT COUNT(*) FROM tokens").fetchone()[0]
             status = quiet_status(conn, quiet) | {"hidden": hidden, "shown": show_quiet}
             bots = bot_status(conn, quiet)
@@ -1403,40 +1413,191 @@ def platform_ingest(result: dict[str, Any]) -> dict[str, Any]:
             "skipped": len(result.get("rows") or []) - len(rows), "libraryWallets": total}
 
 
-def quiet_wallets(conn: sqlite3.Connection) -> dict[tuple[str, str], int | None]:
+KEEP_REASON = {"mark": "你标过的", "sm": "聪明钱追踪中", "avoid": "要避开的", "gold": "早买金狗那几条", "platform": "FOMO／pump.fun 用户"}
+KEEP_LABEL_REASON = {"insider": "avoid", "bundle_member": "avoid", "sniper": "avoid", "fomo_user": "platform", "pump_user": "platform",
+                     "gold_regular": "gold", "fresh_gold": "gold", "top_seller": "gold", "diamond": "gold", "paper_gold": "gold"}
+assert set(KEEP_LABEL_REASON) == KEEP_LABELS
+
+
+def wallet_groups(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    coin: dict[str, float] = {}
-    for r in conn.execute(f"SELECT a.chain, a.address, SUM({EFFECTIVE_TOTAL_SQL}) FROM appearances a GROUP BY a.chain, a.address"):
-        group = norm(r[0], r[1])
-        coin[group] = coin.get(group, 0.0) + (num(r[2]) or 0.0)
-    keep: set[str] = set()
-    pnl30: dict[str, float] = {}
-    pf: dict[str, float] = {}
-    members: dict[str, list[tuple[str, str, int | None]]] = {}
-    for r in conn.execute("SELECT chain, address, first_seen, auto_labels, manual_labels, removed_labels, note, gmgn_tags, pnl30_realized, pf_total FROM wallets"):
+    groups: dict[str, dict[str, Any]] = {}
+
+    def add(group: str, field: str, value: float | None, how: str = "sum") -> None:
+        if value is None:
+            return
+        g = groups.get(group)
+        if g is None:
+            return
+        g[field] = value if g[field] is None else (g[field] + value if how == "sum" else max(g[field], value))
+
+    for r in conn.execute("SELECT chain, address, first_seen, auto_labels, manual_labels, removed_labels, note, gmgn_tags, pnl30_realized, pf_total, gm_total FROM wallets"):
         group = norm(r["chain"], r["address"])
-        if group not in coin:
-            continue
-        members.setdefault(group, []).append((r["chain"], r["address"], r["first_seen"]))
-        pnl30[group] = pnl30.get(group, 0.0) + (num(r["pnl30_realized"]) or 0.0)
-        pf[group] = max(pf.get(group, 0.0), num(r["pf_total"]) or 0.0)
-        if (loads(r["manual_labels"]) or loads(r["removed_labels"]) or str(r["note"] or "").strip()
-                or set(loads(r["auto_labels"])) & KEEP_LABELS or {str(t).lower() for t in loads(r["gmgn_tags"])} & KEEP_GMGN_TAGS):
-            keep.add(group)
-    keep |= {norm(r[0], r[1]) for r in conn.execute("SELECT chain, address FROM platform_names")}
-    keep |= {norm(r[0], r[1]) for r in conn.execute("SELECT chain, address FROM link_reviews WHERE verdict='yes'")}
+        g = groups.setdefault(group, {"members": [], "keep": set(), "coin": None, "pnl30": None, "pf": None, "gm": None, "acct": None})
+        g["members"].append((r["chain"], r["address"], r["first_seen"]))
+        add(group, "pnl30", num(r["pnl30_realized"]))
+        add(group, "pf", num(r["pf_total"]), "max")
+        add(group, "gm", num(r["gm_total"]))
+        if loads(r["manual_labels"]) or loads(r["removed_labels"]) or str(r["note"] or "").strip():
+            g["keep"].add("mark")
+        g["keep"] |= {KEEP_LABEL_REASON[x] for x in set(loads(r["auto_labels"])) & KEEP_LABELS}
+        if {str(t).lower() for t in loads(r["gmgn_tags"])} & KEEP_GMGN_TAGS:
+            g["keep"].add("avoid")
+    for r in conn.execute(f"SELECT a.chain, a.address, SUM({EFFECTIVE_TOTAL_SQL}) FROM appearances a GROUP BY a.chain, a.address"):
+        g = groups.get(norm(r[0], r[1]))
+        if g is not None:
+            g["coin"] = (g["coin"] or 0.0) + (num(r[2]) or 0.0)
+    for r in conn.execute("SELECT chain, address, total FROM plat_accounts WHERE at IS NOT NULL AND total IS NOT NULL"):
+        add(norm(r[0], r[1]), "acct", num(r[2]), "max")
+
+    def mark(rows: Any, reason: str) -> None:
+        for r in rows:
+            g = groups.get(norm(r[0], r[1]))
+            if g is not None:
+                g["keep"].add(reason)
+
+    mark(conn.execute("SELECT chain, address FROM platform_names"), "platform")
+    mark(conn.execute("SELECT chain, address FROM link_reviews WHERE verdict='yes'"), "mark")
     if "user_labels" in tables:
-        keep |= {norm("", r[0]) for r in conn.execute("SELECT address FROM user_labels")}
+        mark(conn.execute("SELECT '', address FROM user_labels"), "mark")
     if "sm_wallets" in tables:
-        keep |= {norm(r[0], r[1]) for r in conn.execute("SELECT chain, address FROM sm_wallets WHERE watch=1")}
+        mark(conn.execute("SELECT chain, address FROM sm_wallets WHERE watch=1"), "sm")
+    return groups
+
+
+def quiet_wallets(conn: sqlite3.Connection) -> dict[tuple[str, str], int | None]:
     out: dict[tuple[str, str], int | None] = {}
-    for group, rows in members.items():
-        if group in keep or max(coin[group], pnl30[group], pf[group]) >= QUIET_PNL_USD:
+    for g in wallet_groups(conn).values():
+        if g["coin"] is None or g["keep"] or max(g["coin"], g["pnl30"] or 0.0, g["pf"] or 0.0, g["gm"] or 0.0) >= QUIET_PNL_USD:
             continue
-        seen = [first_seen for _, _, first_seen in rows]
+        seen = [first_seen for _, _, first_seen in g["members"]]
         start = None if None in seen else max(QUIET_SINCE, *seen)
-        for chain, address, _ in rows:
+        for chain, address, _ in g["members"]:
             out[(chain, address)] = start
+    return out
+
+
+CLEANUP_SCOPES = {"": "全部", "Solana": "Solana", "EVM": "BSC／Robinhood"}
+CLEANUP_KEEP_ORDER = ("mark", "sm", "avoid", "gold", "platform")
+
+
+def group_best(g: dict[str, Any]) -> tuple[float | None, str]:
+    if g.get("acct") is not None:
+        return g["acct"], "acct"
+    vals = [(g[k], k) for k in ("coin", "pnl30", "gm", "pf") if g.get(k) is not None]
+    if not vals:
+        return None, ""
+    return max(vals)
+
+
+def cleanup_candidates(conn: sqlite3.Connection, threshold: float, platform: bool = False, scope: str = "", young: bool = True,
+                       now: float | None = None) -> dict[str, Any]:
+    now = time.time() if now is None else now
+    if scope not in CLEANUP_SCOPES:
+        raise ValueError("链的范围不对")
+    due: dict[str, dict[str, Any]] = {}
+    kept = {k: 0 for k in CLEANUP_KEEP_ORDER}
+    no_data = young_skipped = 0
+    for group, g in wallet_groups(conn).items():
+        chains = {c for c, _, _ in g["members"]}
+        if scope == "Solana" and "Solana" not in chains or scope == "EVM" and not chains & set(EVM_CHAINS):
+            continue
+        best, src = group_best(g)
+        if best is None:
+            no_data += 1
+            continue
+        if best >= threshold:
+            continue
+        reasons = g["keep"] - ({"platform"} if platform else set())
+        if reasons:
+            kept[next(k for k in CLEANUP_KEEP_ORDER if k in reasons)] += 1
+            continue
+        seen = [fs for _, _, fs in g["members"] if fs is not None]
+        first = max(seen) if seen else None
+        if not young and first is not None and first > now - PRUNE_AFTER_DAYS * 86400:
+            young_skipped += 1
+            continue
+        due[group] = {"members": [(c, a) for c, a, _ in g["members"]], "best": best, "src": src, "firstSeen": first,
+                      **{k: g[k] for k in ("coin", "pnl30", "gm", "pf", "acct")}, "platform": "platform" in g["keep"]}
+    return {"due": due, "kept": kept, "noData": no_data, "youngSkipped": young_skipped}
+
+
+def cleanup_rule(threshold: float, platform: bool, scope: str, young: bool) -> str:
+    return (f"手动清理：总体盈利（库里每颗币的盈亏加总、GMGN 30 天已实现、GMGN 历史总盈利、平台战绩，有数据的取最高；pump.fun 用户算过帐号总盈亏的以它为准）不到 ${threshold:,.0f}；"
+            f"链：{CLEANUP_SCOPES.get(scope, scope)}；{'平台用户也一起看' if platform else '平台用户不删'}；{f'进库不满 {PRUNE_AFTER_DAYS} 天的也删' if young else f'进库不满 {PRUNE_AFTER_DAYS} 天的不删'}；"
+            "你标过的、聪明钱追踪中、要避开的、早买金狗那几条照样不删")
+
+
+def cleanup_apply(groups: set[str] | list[str], threshold: float, platform: bool = False, scope: str = "", young: bool = True,
+                  now: float | None = None) -> dict[str, Any]:
+    now = int(now if now is not None else time.time())
+    picked = set(groups)
+    with LOCK:
+        conn = connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            cand = cleanup_candidates(conn, threshold, platform, scope, young, now)
+            due = sorted(g for g in picked if g in cand["due"])
+            keys = [(c, a) for g in due for c, a in cand["due"][g]["members"]]
+            result: dict[str, Any] = {"ok": True, "at": now, "picked": len(picked), "deleted": 0, "wallets": 0, "archive": "",
+                                      "changed": len(picked) - len(due)}
+            if keys:
+                wallets = [dict(r) for key in keys for r in conn.execute("SELECT * FROM wallets WHERE chain=? AND address=?", key)]
+                apps = [dict(r) for key in keys for r in conn.execute("SELECT * FROM appearances WHERE chain=? AND address=?", key)]
+                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+                path = ARCHIVE_DIR / f"cleanup-{_local_time(now, '%Y%m%d-%H%M%S')}.json.gz"
+                blob = gzip.compress(json.dumps({"version": 1, "kind": "cleanup", "prunedAt": now, "rule": cleanup_rule(threshold, platform, scope, young),
+                                                 "wallets": wallets, "appearances": apps}, ensure_ascii=False).encode("utf-8"))
+                tmp = path.with_suffix(".tmp")
+                with open(tmp, "wb") as fh:
+                    fh.write(blob)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                tmp.replace(path)
+                back = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+                if len(back.get("wallets") or []) != len(wallets) or len(back.get("appearances") or []) != len(apps):
+                    raise RuntimeError("封存文件读回笔数不符，这次不删")
+                for key in keys:
+                    conn.execute("DELETE FROM appearances WHERE chain=? AND address=?", key)
+                    conn.execute("DELETE FROM wallets WHERE chain=? AND address=?", key)
+                    conn.execute("INSERT OR REPLACE INTO lib_removed(chain, address, at, archive) VALUES (?,?,?,?)", (*key, now, path.name))
+                result.update({"deleted": len(due), "wallets": len(wallets), "archive": path.name})
+            _state_put(conn, "cleanup:last", result | {"threshold": threshold, "platform": platform, "scope": scope, "young": young})
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+
+def save_gm(chain: str, addresses: list[str], rows: list[dict[str, Any]], now: int | None = None) -> dict[str, int]:
+    now = int(time.time() if now is None else now)
+    by = {norm(chain, r.get("wallet_address") or r.get("address")): r for r in rows if isinstance(r, dict)}
+    out = {"updated": 0, "noData": 0}
+    with LOCK:
+        conn = connect()
+        try:
+            for address in addresses:
+                p = by.get(norm(chain, address))
+                if p is None:
+                    conn.execute("UPDATE wallets SET gm_total=NULL, gm_realized=NULL, gm_buys=NULL, gm_sells=NULL, gm_at=?, gm_note=? WHERE chain=? AND address=?",
+                                 (now, "GMGN 没有这个钱包在这条链的纪录", chain, address))
+                    out["noData"] += 1
+                    continue
+                total = num(p.get("total_profit"))
+                realized = num(p.get("total_realized_profit"))
+                realized = realized if realized is not None else num(p.get("realized_profit"))
+                if total is None and realized is not None:
+                    total = realized + (num(p.get("unrealized_profit")) or 0.0)
+                buys, sells = num(p.get("buy")), num(p.get("sell"))
+                conn.execute("UPDATE wallets SET gm_total=?, gm_realized=?, gm_buys=?, gm_sells=?, gm_at=?, gm_note='' WHERE chain=? AND address=?",
+                             (total, realized, int(buys) if buys is not None else None, int(sells) if sells is not None else None, now, chain, address))
+                out["updated"] += 1
+            conn.commit()
+        finally:
+            conn.close()
     return out
 
 
@@ -1509,7 +1670,7 @@ def prune_quiet(now: float | None = None, dry_run: bool = False) -> dict[str, An
                 tmp.replace(path)
                 back = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
                 if len(back.get("wallets") or []) != len(wallets) or len(back.get("appearances") or []) != len(apps):
-                    raise RuntimeError("封存盘读回笔数不符，这次不删")
+                    raise RuntimeError("封存文件读回笔数不符，这次不删")
                 for key in due:
                     conn.execute("DELETE FROM appearances WHERE chain=? AND address=?", key)
                     conn.execute("DELETE FROM wallets WHERE chain=? AND address=?", key)
@@ -1979,7 +2140,9 @@ def platform_names_add(chain: str, platform: str, items: list[dict[str, Any]], c
                     in_lib += 1
                     for c in lib_chains:
                         recompute_labels(conn, c, address)
-                elif ADDRESS_RE[chain].match(address) and _ensure_wallet(conn, chain, address, now):
+                elif (ADDRESS_RE[chain].match(address)
+                      and not conn.execute(f"SELECT 1 FROM lib_removed WHERE chain IN ({','.join('?' * len(wchains))}) AND address=?", (*wchains, address)).fetchone()
+                      and _ensure_wallet(conn, chain, address, now)):
                     recompute_labels(conn, chain, address)
                     created.append(address)
             conn.commit()
@@ -2250,7 +2413,7 @@ def purge_bots(now: float | None = None, dry_run: bool = False) -> dict[str, Any
                 tmp.replace(path)
                 back = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
                 if len(back.get("wallets") or []) != len(wallets) or len(back.get("appearances") or []) != len(apps):
-                    raise RuntimeError("封存盘读回笔数不符，这次不删")
+                    raise RuntimeError("封存文件读回笔数不符，这次不删")
                 for key in due:
                     conn.execute("DELETE FROM appearances WHERE chain=? AND address=?", key)
                     conn.execute("DELETE FROM wallets WHERE chain=? AND address=?", key)
@@ -2297,6 +2460,9 @@ def restore_archive(path: str | Path) -> dict[str, Any]:
                     removed = loads(row["removed_labels"]) if row else []
                     if row and "bot" not in removed:
                         conn.execute("UPDATE wallets SET removed_labels=? WHERE chain=? AND address=?", (json.dumps(removed + ["bot"]), w["chain"], w["address"]))
+            if data.get("kind") == "cleanup":
+                for w in data.get("wallets") or []:
+                    conn.execute("DELETE FROM lib_removed WHERE chain=? AND address=?", (w["chain"], w["address"]))
             for w in data.get("wallets") or []:
                 recompute_labels(conn, w["chain"], w["address"])
             conn.commit()
@@ -2308,13 +2474,13 @@ def restore_archive(path: str | Path) -> dict[str, Any]:
 if __name__ == "__main__":
     import argparse
     import sys
-    parser = argparse.ArgumentParser(description=f"钱包库维护：清理总体盈利不到 {QUIET_TEXT} 的钱包／从封存盘还原")
+    parser = argparse.ArgumentParser(description=f"钱包库维护：清理总体盈利不到 {QUIET_TEXT} 的钱包／从封存文件还原")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_prune = sub.add_parser("prune", help="照规则清理（先封存再删）")
     p_prune.add_argument("--dry-run", action="store_true", help="只算数量，不封存不删")
     p_bots = sub.add_parser("bots", help="把机器人移出钱包库（先封存再删）")
     p_bots.add_argument("--dry-run", action="store_true", help="只算数量，不封存不删")
-    p_restore = sub.add_parser("restore", help="把封存盘的钱包放回钱包库")
+    p_restore = sub.add_parser("restore", help="把封存文件的钱包放回钱包库")
     p_restore.add_argument("archive")
     sub.add_parser("follow", help="马上重算实力卡的跟单纪录（平常维护调度每 6 小时算一次）")
     args = parser.parse_args()
