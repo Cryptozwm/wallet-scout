@@ -1,0 +1,90 @@
+{
+  "manifest_version": 3,
+  "name": "Wallet Scout",
+  "short_name": "Wallet Scout",
+  "version": "0.1.0",
+  "description": "在 GMGN、DeBot、Ave 的币页标出哪些持有人在你本机的钱包库里（标签、实力等级、平台帐号、聪明钱信号）。只连你自己的本机服务。",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Wallet Scout（Alt+W）",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "tabs",
+    "contextMenus",
+    "scripting",
+    "clipboardRead"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://gmgn.ai/*",
+    "https://www.gmgn.ai/*",
+    "https://debot.ai/*",
+    "https://www.debot.ai/*",
+    "https://ave.ai/*",
+    "https://www.ave.ai/*",
+    "https://pump.fun/*",
+    "https://www.pump.fun/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gmgn.ai/*",
+        "https://www.gmgn.ai/*",
+        "https://debot.ai/*",
+        "https://www.debot.ai/*",
+        "https://ave.ai/*",
+        "https://www.ave.ai/*"
+      ],
+      "js": [
+        "lib/ca.js",
+        "content/badges.js",
+        "content/float.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "sidepanel.html",
+        "icons/icon32.png",
+        "icons/icon48.png"
+      ],
+      "matches": [
+        "https://gmgn.ai/*",
+        "https://www.gmgn.ai/*",
+        "https://debot.ai/*",
+        "https://www.debot.ai/*",
+        "https://ave.ai/*",
+        "https://www.ave.ai/*"
+      ]
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+W"
+      },
+      "description": "打开钱包库侧栏"
+    }
+  }
+}

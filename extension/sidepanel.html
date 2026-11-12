@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>钱包库</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <div class="tok">
+      <img id="tok-logo" class="logo" alt="" hidden>
+      <div class="tok-text">
+        <div class="tok-line"><b id="tok-name">钱包库</b><span id="tok-chain" class="chain" hidden></span>
+          <select id="tok-chain-pick" class="chain-pick" title="网址看不出是哪条链时，手动选" hidden>
+            <option value="bsc">BSC</option><option value="robinhood">RH</option><option value="base">Base</option><option value="eth">ETH</option>
+          </select></div>
+        <div id="tok-sub" class="tok-sub">打开 GMGN、DeBot 或 Ave 的币页</div>
+      </div>
+      <span id="srv" class="srv" title="本机服务连接状态"><i></i><span id="srv-text">连接中</span></span>
+      <button id="btn-search" class="icon-btn" title="查地址（贴钱包地址）" aria-label="查地址" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.3" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.2 10.2l3.3 3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <button id="btn-refresh" class="icon-btn" title="刷新（重抓前 100 持有人）" aria-label="刷新">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v2.6h-2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="btn-settings" class="icon-btn" title="设置" aria-label="设置" aria-expanded="false">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div id="ca-box" class="ca" hidden><code id="ca-text"></code><button id="btn-copy-ca" class="btn sm">拷贝</button></div>
+    <form id="search" class="search" hidden>
+      <input id="q" type="text" spellcheck="false" autocomplete="off" aria-label="钱包地址" placeholder="贴钱包地址（或含地址的文字）">
+      <button class="btn" type="submit">查钱包库</button>
+    </form>
+    <div id="search-msg" class="search-msg" hidden></div>
+  </header>
+
+  <section id="settings" class="settings" hidden>
+    <label class="field"><span>本机服务地址</span><input id="set-server" type="url" spellcheck="false" placeholder="http://127.0.0.1:8787"></label>
+    <label class="field"><span>点信号开哪个网站</span>
+      <select id="set-site"><option value="gmgn">GMGN</option><option value="debot">DeBot</option><option value="ave">Ave</option></select></label>
+    <label class="field"><span>显示模式</span>
+      <select id="set-panelmode"><option value="side">侧边栏（靠右）</option><option value="float">右下角浮动窗口</option></select></label>
+    <p id="panelmode-hint" class="muted small" hidden></p>
+    <label class="check"><input id="set-auto" type="checkbox"> 每 60 秒自动刷新</label>
+    <label class="check"><input id="set-badges" type="checkbox"> 在网页持有人清单上加徽章</label>
+    <div class="set-row"><button id="btn-test" class="btn">测试连接</button><span id="set-msg" class="muted"></span></div>
+  </section>
+
+  <nav class="tabs" role="tablist">
+    <button id="tab-holders" role="tab" aria-selected="true" data-tab="holders">持有人</button>
+    <button id="tab-signals" role="tab" aria-selected="false" data-tab="signals">信号<span id="sig-count" class="tab-count" hidden></span></button>
+  </nav>
+
+  <main>
+    <section id="pane-holders" role="tabpanel">
+      <div id="wallet-view" class="wallet" hidden></div>
+      <div id="holders-empty" class="empty">
+        <p>在 GMGN、DeBot 或 Ave 打开任何一颗币，这里会列出前 100 持有人里哪些在钱包库。</p>
+        <p class="muted">打开钱包页（GMGN、DeBot、BscScan、Solscan）会直接显示这个钱包；也可以在上面贴地址查，或在网页的地址上按右键「在钱包库查这个地址」。</p>
+      </div>
+      <div id="holders-body" hidden>
+        <div id="err" class="err" hidden></div>
+        <div class="stats">
+          <button class="stat" data-filter="lib" title="前 100 持有人里钱包库认得的（有名字、等级、标签、平台帐号或聪明钱；只在库、没有标记的不算）"><b id="st-top">–</b><span>前 100 在库</span></button>
+          <button class="stat up" data-filter="follow" title="高手：等级 S／A 或有高手类标签"><b id="st-follow">–</b><span>高手</span></button>
+          <button class="stat dn" data-filter="avoid" title="要避开：庄家、捆绑、狙击、机器人"><b id="st-avoid">–</b><span>要避开</span></button>
+          <button class="stat" data-filter="smart" title="聪明钱名单、平台帐号"><b id="st-smart">–</b><span>聪明钱</span></button>
+        </div>
+        <div id="conc" class="conc" hidden>
+          <div class="conc-bar" aria-hidden="true"><i class="seg av"></i><i class="seg fo"></i><i class="seg lib"></i></div>
+          <div id="conc-text" class="conc-text"></div>
+        </div>
+        <div id="flow" class="flow" hidden></div>
+        <div id="tok-signals" class="tok-signals"></div>
+        <div id="plat" class="plat" hidden></div>
+        <div class="filters" role="group" aria-label="筛选">
+          <button class="chip on" data-filter="lib">全部在库</button>
+          <button class="chip" data-filter="follow">高手</button>
+          <button class="chip" data-filter="avoid">避开</button>
+          <button class="chip" data-filter="platform">平台</button>
+          <button class="chip" data-filter="smart">聪明钱</button>
+          <label class="all-toggle"><input id="show-all" type="checkbox"> 显示前 100 全部</label>
+        </div>
+        <ol id="list" class="list"></ol>
+        <div id="list-empty" class="muted list-empty" hidden></div>
+        <details id="others" class="others" hidden>
+          <summary>不在前 100 的相关钱包（<span id="others-count">0</span>）</summary>
+          <p class="muted small">钱包库记录过这颗币、或聪明钱在这颗币有买卖，但现在不在前 100（可能卖光了，或还没抓到前 100）。</p>
+          <ol id="others-list" class="list"></ol>
+        </details>
+        <p id="meta" class="meta"></p>
+        <p id="note" class="meta"></p>
+      </div>
+    </section>
+
+    <section id="pane-signals" role="tabpanel" hidden>
+      <div class="sig-head">
+        <span class="muted">最近</span>
+        <select id="sig-hours" aria-label="时间范围"><option value="1">1 小时</option><option value="3">3 小时</option><option value="6" selected>6 小时</option><option value="12">12 小时</option><option value="24">24 小时</option></select>
+        <span class="muted">的聪明钱信号</span>
+        <select id="sig-chain" aria-label="链"><option value="">全部链</option><option value="bsc">BSC</option><option value="sol">SOL</option><option value="robinhood">RH</option></select>
+      </div>
+      <div id="sig-err" class="err" hidden></div>
+      <ol id="sig-list" class="sig-list"></ol>
+      <p id="sig-meta" class="meta"></p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="lib/ca.js"></script>
+  <script src="lib/bookmarklet.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

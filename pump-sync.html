@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0e11">
+  <link rel="icon" href="data:,">
+  <title>pump.fun 战绩同步｜MEME 钱包侦查</title>
+  <script src="./theme-boot.js?v=20261025-ui"></script>
+  <link rel="stylesheet" href="./app.css?v=20261112-names">
+  <link rel="stylesheet" href="./pump-sync.css?v=20261112-names">
+</head>
+<body>
+  <main class="ps" id="ps-root">
+    <header class="ps-head">
+      <h1>pump.fun 战绩同步</h1>
+      <p class="ps-summary" id="ps-summary">读取钱包库…</p>
+    </header>
+
+    <section class="ps-setup" id="ps-setup" hidden>
+      <p class="ps-reason" id="ps-reason" hidden></p>
+      <p>pump.fun 不让服务器直接查，所以帐号总盈亏要在你的浏览器里算：每个人交易过的每颗币，把 pump.fun 自己算的盈亏加起来。</p>
+      <ol class="ps-steps">
+        <li>第一次：把下面这颗按住拖到书签列。<a class="btn btn-primary ps-drag" id="ps-bookmarklet" href="#">盈利</a></li>
+        <li>之后：打开任何一个 pump.fun 页面，按一下这个书签。页面开着 Leaderboard（排行榜）的话，会顺便把排行榜每个人的名字和地址绑进钱包库。</li>
+        <li>另外两颗「持币」（查地址页）、「热门」（挖掘页）各管各的。</li>
+      </ol>
+      <p class="muted">按下去会开一个小窗口显示进度，算完自己存回钱包库，不用拷贝粘贴。小窗口关掉就停，下次按会从没算的接着算；72 小时内算过的不重算。只用 pump.fun 的公开数据。</p>
+      <p><a class="btn" href="https://pump.fun/" target="_blank" rel="noopener noreferrer">打开 pump.fun</a></p>
+    </section>
+
+    <section class="ps-board" id="ps-board" hidden aria-live="polite">
+      <p class="ps-board-sum" id="ps-board-sum"></p>
+      <details class="ps-board-more" id="ps-board-more" hidden>
+        <summary>绑了谁（名字、地址）</summary>
+        <ol class="ps-log" id="ps-board-list"></ol>
+      </details>
+    </section>
+
+    <section class="ps-run" id="ps-run" hidden>
+      <div class="ps-bar" id="ps-bar" role="progressbar" aria-label="同步进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="ps-bar-fill"></span></div>
+      <p class="ps-status" id="ps-status" aria-live="polite"></p>
+      <p class="ps-counts" id="ps-counts"></p>
+      <div class="ps-actions">
+        <button class="btn" type="button" id="ps-stop" hidden>停止</button>
+        <button class="btn btn-ghost" type="button" id="ps-all" hidden>全部重算</button>
+      </div>
+      <ol class="ps-log" id="ps-log" aria-label="算好的用户（最新的在上面）"></ol>
+    </section>
+  </main>
+  <script src="./bookmarklet.js?v=20261112-fboard"></script>
+  <script src="./pump-sync.js?v=20261112-libjoin"></script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0e11">
+  <link rel="icon" href="data:,">
+  <title>钱包库｜MEME 钱包侦查</title>
+  <script src="./theme-boot.js?v=20261025-ui"></script>
+  <link rel="stylesheet" href="./app.css?v=20261111-libbm">
+</head>
+<body data-page="library">
+  <nav class="rail" aria-label="主要功能">
+    <div class="rail-mark" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.8v4.4M12 17.8v4.4M1.8 12h4.4M17.8 12h4.4"/></svg></div>
+    <a class="rail-item" href="./smart-money.html"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12.5h4l2.6-6.5 4.6 13 2.8-6.5h5"/></svg>聪明钱</a>
+    <a class="rail-item" href="./analyze.html"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.5 20.5l-4.8-4.8"/></svg>查地址</a>
+    <a class="rail-item" href="./library.html" aria-current="page"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l8.8 4.6-8.8 4.6-8.8-4.6z"/><path d="M3.2 12.2l8.8 4.6 8.8-4.6"/><path d="M3.2 16.4l8.8 4.6 8.8-4.6"/></svg>钱包库</a>
+    <div class="rail-spacer"></div>
+    <button class="rail-item" type="button" id="app-settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>设置</button>
+  </nav>
+
+  <div class="app">
+    <header class="topbar">
+      <h1 class="page-title">钱包库</h1>
+      <form class="quick-search" action="./analyze.html" method="get" role="search">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.5 20.5l-4.8-4.8"/></svg>
+        <input name="q" type="text" placeholder="查地址：粘贴钱包或 CA" autocomplete="off" spellcheck="false" aria-label="查地址">
+      </form>
+    </header>
+
+    <main class="page" id="library-root">
+      <form class="lib-toolbar" id="library-search">
+        <label class="field grow">搜索<input id="library-q" type="search" autocomplete="off" placeholder="地址、名称、X、CA、代币或备注"></label>
+        <label class="field">链<select id="library-chain"><option value="">全部</option><option>Solana</option><option>BSC</option><option>ETH</option><option>Base</option><option>Arbitrum</option><option>Robinhood</option></select></label>
+        <label class="field">标签<select id="library-label"><option value="">全部</option></select></label>
+        <button class="btn btn-primary" type="submit">搜索</button>
+        <label class="select-wrap lib-quiet-toggle"><input type="checkbox" id="library-show-quiet"> 显示低盈利 的钱包</label>
+        <div class="end">
+          <button class="btn btn-ghost" type="button" id="open-labels">导入私人标签</button>
+          <button class="btn btn-ghost" type="button" id="open-platform-export">导出到 DeBot／GMGN</button>
+          <button class="btn btn-ghost" type="button" id="library-export">导出 XLSX</button>
+        </div>
+      </form>
+      <p class="trace-data-note" id="library-status" role="status" aria-live="polite"></p>
+      <section class="lib-bm" aria-label="书签">
+        <div class="lib-bm-main">
+          <a class="btn btn-primary lib-bm-drag" id="lib-bm-pnl" href="./pump-sync.html" title="按住拖到书签列">盈利</a>
+          <div class="lib-bm-text">
+            <strong>pump.fun 帐号总盈亏</strong>
+            <span id="lib-bm-pump" aria-live="polite">读取进度…</span>
+            <small>把「盈利」按住拖到书签列（书签列没出现就按 Ctrl+Shift+B），到任何 pump.fun 页按一下：会开小窗口自动算，每算好 5 位就存回钱包库；小窗口关掉就停，下次按会接着算。</small>
+          </div>
+        </div>
+        <p class="lib-bm-more">另外两颗也在这里拖：<a class="bm-link" id="lib-bm-hold" href="./analyze.html">持币</a> 在 FOMO 或 pump.fun 的币页按，查这颗币的平台持有人；<a class="bm-link" id="lib-bm-hot" href="./smart-money.html">热门</a> 在 FOMO 页按，给聪明钱的挖掘用。</p>
+      </section>
+      <p class="trace-data-note lib-quiet-note" id="library-quiet-note" hidden></p>
+
+      <div class="table-wrap trace-section">
+        <table>
+          <thead><tr><th>链</th><th>钱包</th><th>标签</th><th>实力</th><th>出现 CA 数</th><th>累计盈利</th><th>备注</th><th></th></tr></thead>
+          <tbody id="library-body" data-own-click></tbody>
+        </table>
+      </div>
+      <div class="library-pager">
+        <span id="library-page"></span>
+        <div><button class="btn btn-sm" type="button" id="library-prev">上一页</button><button class="btn btn-sm" type="button" id="library-next">下一页</button></div>
+      </div>
+
+      <section class="library-detail" id="library-detail" hidden></section>
+
+      <details class="footnote">
+        <summary>自动标签规则</summary>
+        <p>每次在「查地址」查 CA 或钱包，早期买入、高盈利、KOL 和它们的主币／USD 稳定币资金来源会自动写进这台电脑的 wallet-library.sqlite3，不上传。所有关联只代表资金「相关」，不代表同一主人。</p>
+        <ul id="library-rules"></ul>
+      </details>
+    </main>
+  </div>
+
+  <dialog class="sheet" id="labels-dialog" aria-labelledby="labels-title">
+    <div class="sheet-head"><h2 id="labels-title">我的私人标签</h2><button type="button" class="btn btn-ghost btn-icon" id="labels-close" aria-label="关闭"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-body">
+      <p class="sheet-note">一行一笔：「地址 Tab 标签」或「地址,标签」，SOL 和 EVM 都可以。标成「我」或「我的…」会当成你自己的钱包。只存在这台电脑，不进公开导出。</p>
+      <textarea id="user-labels-text" rows="8" placeholder="0x...&#9;标签"></textarea>
+      <label class="select-wrap"><input type="checkbox" id="user-labels-replace"> 先清空全部私人标签再导入</label>
+      <div class="sheet-actions">
+        <button class="btn btn-primary" type="button" id="user-labels-import">导入</button>
+        <button class="btn btn-ghost" type="button" id="user-labels-export">导出 TSV</button>
+      </div>
+      <div id="user-labels-result" class="sheet-note" role="status"></div>
+    </div>
+  </dialog>
+
+  <dialog class="sheet" id="platform-export-dialog" aria-labelledby="platform-export-title">
+    <div class="sheet-head"><h2 id="platform-export-title">导出到 DeBot／GMGN</h2><button type="button" class="btn btn-ghost btn-icon" id="platform-export-close" aria-label="关闭"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-body">
+      <p class="sheet-note">把钱包库的钱包排成导入格式。备注最前面是实力等级（例如 S级，他自己 30 天赚不赚，不代表跟了会赚），再写要避开的（⚠ 开头）、高手标签，最多 4 个标签，最后接平台帐号（例如 pump:帐号(X:帐号)）和战绩。平台用户（FOMO／pump.fun）的盈亏只写平台自己算的，不写 GMGN 的数字：pump.fun 用户算过帐号总盈亏的写「pump总+12.3K」（每颗交易过的币加总），其他写「平台盈亏CC+2.2K」（钱包库里那几颗币）；其他钱包才写 GMGN 总盈利、30 天胜率（「GMGN总+1.2K」）。同源捆绑写成「⚠币名捆1」：同一颗币的同一组都是 1，下一组是 2。GMGN 自己的捆绑标签分不出组，不写进备注。拷贝后到 DeBot 或 GMGN 的导入框粘贴。</p>
+      <div class="sheet-group">
+        <div class="export-pick-head"><h3>要导出</h3><button type="button" class="btn btn-sm btn-ghost" id="export-reset">恢复预设</button></div>
+        <p class="sheet-note">任一个符合就导出，数字是这条链各有几个；同一个钱包只会出现一次，符合的标签都写进备注。</p>
+        <div class="export-picks" id="export-picks"></div>
+      </div>
+      <div class="sheet-group">
+        <h3>不要导出</h3>
+        <p class="sheet-note">任一个符合就不导出，数字是这一项在这条链挡掉几个。有勾 FOMO 或 pump.fun 用户时，对上的平台用户（有设总盈利门槛就只算达到门槛的）一定导出，不受这里影响。</p>
+        <div class="seg seg-wrap" id="export-drops" role="group" aria-label="不要导出哪些钱包"></div>
+      </div>
+      <div class="sheet-group"><h3>链</h3><div class="seg" id="platform-export-chain" role="group" aria-label="链"></div></div>
+      <div class="sheet-group">
+        <h3>格式</h3>
+        <div class="seg" id="platform-export-format" role="group" aria-label="格式">
+          <button type="button" data-format="debot" aria-pressed="true">DeBot</button>
+          <button type="button" data-format="gmgn" aria-pressed="false">GMGN</button>
+        </div>
+        <p class="sheet-note" id="platform-export-format-note"></p>
+      </div>
+      <textarea class="export-preview" id="platform-export-preview" rows="8" readonly spellcheck="false" aria-label="要拷贝的内容"></textarea>
+      <div class="sheet-actions">
+        <button class="btn btn-primary" type="button" id="platform-export-copy" disabled>拷贝</button>
+        <span class="sheet-note" id="platform-export-status" role="status" aria-live="polite"></span>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="./jszip.min.js?v=3.10.1"></script>
+  <script src="./shell.js?v=20261111-card"></script>
+  <script src="./wallet-investigator.js?v=20261111-relay"></script>
+  <script src="./bookmarklet.js?v=20261112-fboard"></script>
+  <script src="./library-page.js?v=20261111-libbm"></script>
+</body>
+</html>

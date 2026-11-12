@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0e11">
+  <link rel="icon" href="data:,">
+  <title>查地址｜MEME 钱包侦查</title>
+  <script src="./theme-boot.js?v=20261025-ui"></script>
+  <link rel="stylesheet" href="./app.css?v=20261112-savedcheck">
+</head>
+<body data-page="lookup">
+  <nav class="rail" aria-label="主要功能">
+    <div class="rail-mark" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.8v4.4M12 17.8v4.4M1.8 12h4.4M17.8 12h4.4"/></svg></div>
+    <a class="rail-item" href="./smart-money.html"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12.5h4l2.6-6.5 4.6 13 2.8-6.5h5"/></svg>聪明钱</a>
+    <a class="rail-item" href="./analyze.html" aria-current="page"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.5 20.5l-4.8-4.8"/></svg>查地址</a>
+    <a class="rail-item" href="./library.html"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l8.8 4.6-8.8 4.6-8.8-4.6z"/><path d="M3.2 12.2l8.8 4.6 8.8-4.6"/><path d="M3.2 16.4l8.8 4.6 8.8-4.6"/></svg>钱包库</a>
+    <div class="rail-spacer"></div>
+    <button class="rail-item" type="button" id="app-settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>设置</button>
+  </nav>
+
+  <div class="app">
+    <header class="topbar"><h1 class="page-title">查地址</h1></header>
+
+    <main class="page lookup">
+      <form class="lookup-form" id="analyze-form" autocomplete="off">
+        <div class="lookup-box">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.5 20.5l-4.8-4.8"/></svg>
+          <input id="analyze-input" type="text" placeholder="粘贴钱包地址或合约地址（CA）" spellcheck="false" aria-label="钱包地址或合约地址">
+          <button class="btn btn-primary" type="submit" id="analyze-submit">分析</button>
+        </div>
+        <details class="lookup-adv">
+          <summary>高级</summary>
+          <div class="adv-grid">
+            <label class="field">链
+              <select id="analyze-chain"><option value="" selected>自动判断</option><option>BSC</option><option>ETH</option><option>Base</option><option>Robinhood</option><option>Solana</option></select>
+            </label>
+            <label class="field">合约：开盘后时间窗
+              <select id="window"><option value="15">开盘后 15 分钟</option><option value="60" selected>开盘后 1 小时</option><option value="360">开盘后 6 小时</option></select>
+            </label>
+            <label class="field">钱包：追查方向
+              <select id="trace-direction"><option value="both" selected>来源＋去向</option><option value="upstream">只看来源</option><option value="downstream">只看去向</option></select>
+            </label>
+            <label class="field">钱包：资产范围
+              <select id="trace-assets"><option value="all" selected>主币＋USD 稳定币</option><option value="native">只看主币</option><option value="usd">只看 USD 稳定币</option></select>
+            </label>
+          </div>
+        </details>
+      </form>
+      <p class="lookup-status" id="analyze-status" role="status" aria-live="polite"></p>
+      <div class="recent" id="recent" hidden></div>
+
+      <form id="scan-form" hidden>
+        <select id="chain"><option value="Auto" selected>自动判断</option><option>ETH</option><option>Base</option><option>BSC</option><option>Solana</option><option>Arbitrum</option><option>Robinhood</option></select>
+        <input id="contract">
+        <button type="submit">查合约</button>
+      </form>
+      <form id="source-trace-form" hidden>
+        <input id="trace-wallet">
+        <button type="submit">查钱包</button>
+      </form>
+
+      <section class="result" id="result" hidden>
+        <header class="result-head">
+          <div id="quick-card"></div>
+          <div class="rh-actions">
+            <span class="rh-actions" id="quick-links"></span>
+            <button class="btn btn-sm" type="button" id="export-report" hidden>导出 XLSX</button>
+            <button class="btn btn-sm" type="button" id="trace-export-report" hidden>导出 XLSX</button>
+          </div>
+        </header>
+        <div class="verdict" id="verdict-card" hidden></div>
+        <div class="progress-line" id="progress-line">
+          <span class="spinner" aria-hidden="true"></span>
+          <p class="form-hint" id="scan-status" role="status"></p>
+          <p class="form-hint" id="trace-status" role="status"></p>
+        </div>
+
+        <div id="token-view" hidden>
+          <div class="stats" id="token-stats">
+            <div class="stat"><span class="stat-label">早期买入地址</span><strong id="early-count">--</strong><small id="early-count-note"></small></div>
+            <div class="stat"><span class="stat-label">高盈利地址</span><strong id="profit-count">--</strong><small id="profit-count-note"></small></div>
+            <div class="stat"><span class="stat-label">同源群持仓</span><strong id="cluster-hold">--</strong><small id="cluster-hold-note"></small></div>
+            <div class="stat"><span class="stat-label">前 50 首买合计持仓</span><strong id="top50-share">--</strong><small id="top50-share-note"></small></div>
+          </div>
+          <span hidden><b id="fresh-rate"></b><b id="fresh-rate-note"></b></span>
+          <dl class="meta-row">
+            <div><dt>开盘</dt><dd id="launch-time">--</dd></div>
+            <div><dt>主要交易池</dt><dd id="pool-name">--</dd></div>
+          </dl>
+
+          <div class="tabbar trace-section" role="tablist" id="token-tabs">
+            <button type="button" role="tab" data-pane="tp-early" aria-selected="true">早期买家 <span class="count" data-count="early-body"></span></button>
+            <button type="button" role="tab" data-pane="tp-profit" aria-selected="false">高盈利 <span class="count" data-count="profit-body"></span></button>
+            <button type="button" role="tab" data-pane="tp-groups" aria-selected="false">同源群组 <span class="count" id="groups-count"></span></button>
+            <button type="button" role="tab" data-pane="tp-gmgn" aria-selected="false">GMGN 标签</button>
+            <button type="button" role="tab" data-pane="tp-graph" aria-selected="false">资金关联图</button>
+            <button type="button" role="tab" data-pane="tp-platform" aria-selected="false" id="tab-platform" hidden>平台用户 <span class="count" id="platform-count"></span></button>
+            <button type="button" role="tab" data-pane="tp-library" aria-selected="false">钱包库比对</button>
+            <div class="tabbar-tools">
+              <button class="btn btn-sm btn-ghost" type="button" id="currency-toggle" aria-pressed="false">金额：USD</button>
+              <button class="btn btn-sm btn-ghost" type="button" id="price-refresh">更新价格</button>
+            </div>
+          </div>
+
+          <div class="pane" id="tp-early" role="tabpanel" data-drawer-title="早期买家">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>顺位</th><th>钱包</th><th>首买时间</th><th>累计买入</th><th>买入市值</th><th>卖出市值</th><th>估算总 PnL</th><th>资金来源</th><th>标签</th></tr></thead>
+                <tbody id="early-body" data-merge-from="top50-body" data-merge-cols="目前持仓,目前状态,资金关联"></tbody>
+              </table>
+            </div>
+            <div hidden>
+              <table>
+                <thead><tr><th>#</th><th>钱包</th><th>买入时间</th><th>累计买入</th><th>目前持仓</th><th>目前状态</th><th>资金关联</th></tr></thead>
+                <tbody id="top50-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="pane" id="tp-profit" role="tabpanel" data-drawer-title="高盈利地址" hidden>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>钱包</th><th>已实现 PnL</th><th>未实现 PnL</th><th>买入市值</th><th>卖出市值</th><th>ROI</th><th>仍持仓</th><th>数据状态</th></tr></thead>
+                <tbody id="profit-body"></tbody>
+              </table>
+            </div>
+            <p class="trace-data-note">条件：估算 PnL 至少 $10,000，或估算 ROI 至少 250%。</p>
+          </div>
+
+          <div class="pane" id="tp-groups" role="tabpanel" data-drawer-title="群组成员" hidden>
+            <div class="cluster-cards" id="cluster-cards"></div>
+            <div hidden>
+              <table>
+                <thead><tr><th>群组</th><th>地址数</th><th>关联理由</th><th>估计持仓</th><th>估计利润</th><th>判读</th></tr></thead>
+                <tbody id="cluster-body"></tbody>
+              </table>
+            </div>
+            <p class="trace-data-note">同一来源资助至少两个早期地址才算一组；GMGN 标签与同步买入只列为候选，不计入群组持仓。群组只代表资金「相关」，不代表同一主人。</p>
+          </div>
+
+          <div class="pane" id="tp-gmgn" role="tabpanel" data-drawer-title="GMGN 钱包" hidden>
+            <div class="gmgn-metrics">
+              <div><span>捆绑钱包</span><strong id="gmgn-bundlers">--</strong></div>
+              <div><span>狙击钱包</span><strong id="gmgn-snipers">--</strong></div>
+              <div><span>疑似内幕持仓</span><strong id="gmgn-insiders">--</strong></div>
+              <div><span>聪明钱</span><strong id="gmgn-smart">--</strong></div>
+              <div><span>知名钱包</span><strong id="gmgn-renowned">--</strong></div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>钱包</th><th>公开身份 / 标签</th><th>持仓比例</th><th>平均买入市值</th><th>平均卖出市值</th><th>总盈利</th><th>首笔主币来源</th></tr></thead>
+                <tbody id="gmgn-wallet-body"></tbody>
+              </table>
+            </div>
+            <p class="trace-data-note" id="gmgn-status">等待查找</p>
+          </div>
+
+          <div class="pane" id="tp-graph" role="tabpanel" hidden>
+            <div class="graph-wrap">
+              <div>
+                <div class="wallet-map" id="wallet-map"></div>
+                <div class="legend"><span><i class="node-dot source"></i>共同资金来源</span><span><i class="node-dot"></i>早期买入</span><span><i class="node-dot profit"></i>高盈利</span></div>
+                <div class="path-summary" id="path-summary"></div>
+              </div>
+              <aside>
+                <div class="graph-detail" id="graph-detail" aria-live="polite"><span>节点说明</span><h3>点图上的地址</h3><p>这里会显示它的角色和证据。</p></div>
+                <div class="focus-panel trace-section"><h2>优先追踪</h2><div class="focus-summary" id="focus-summary"></div><ul class="focus-list" id="focus-list"></ul></div>
+              </aside>
+            </div>
+          </div>
+
+          <div class="pane" id="tp-platform" role="tabpanel" data-drawer-title="平台用户" hidden><div id="platform-card"></div></div>
+          <div class="pane" id="tp-library" role="tabpanel" data-drawer-title="钱包库比对" hidden><div class="library-match" id="library-match"></div></div>
+
+          <details class="footnote">
+            <summary>数据源与限制</summary>
+            <p id="data-source-status">尚未查找</p>
+            <p id="trace-basis"></p>
+            <p id="chain-hint"></p>
+            <p id="price-status"></p>
+            <p>只显示实际 API 回传或明确标示的估算值；资金关联只代表「相关」，不代表同一主人。</p>
+          </details>
+        </div>
+
+        <div id="wallet-view" hidden><div id="trace-result"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./jszip.min.js?v=3.10.1"></script>
+  <script src="./shell.js?v=20261111-card"></script>
+  <script src="./wallet-investigator.js?v=20261111-relay"></script>
+  <script src="./bookmarklet.js?v=20261112-fboard"></script>
+  <script src="./analyze.js?v=20261112-savedcheck"></script>
+</body>
+</html>

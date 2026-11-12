@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b0e11">
+  <link rel="icon" href="data:,">
+  <title>聪明钱｜MEME 钱包侦查</title>
+  <script src="./theme-boot.js?v=20261025-ui"></script>
+  <link rel="stylesheet" href="./app.css?v=20261112-names">
+</head>
+<body data-page="smart" data-tab="signals">
+  <nav class="rail" aria-label="主要功能">
+    <div class="rail-mark" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.8v4.4M12 17.8v4.4M1.8 12h4.4M17.8 12h4.4"/></svg></div>
+    <a class="rail-item" href="./smart-money.html" aria-current="page"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12.5h4l2.6-6.5 4.6 13 2.8-6.5h5"/></svg>聪明钱</a>
+    <a class="rail-item" href="./analyze.html"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.5 20.5l-4.8-4.8"/></svg>查地址</a>
+    <a class="rail-item" href="./library.html"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2l8.8 4.6-8.8 4.6-8.8-4.6z"/><path d="M3.2 12.2l8.8 4.6 8.8-4.6"/><path d="M3.2 16.4l8.8 4.6 8.8-4.6"/></svg>钱包库</a>
+    <div class="rail-spacer"></div>
+    <button class="rail-item" type="button" id="app-settings"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>设置</button>
+  </nav>
+
+  <div class="app">
+    <header class="topbar">
+      <h1 class="page-title">聪明钱</h1>
+      <div class="topbar-mid">
+        <div class="pop-anchor">
+          <button class="status-pill" type="button" data-popover="status-pop" aria-expanded="false" aria-controls="status-pop">
+            <span id="pulse" class="pulse" aria-hidden="true"></span><span id="status-title">连接中</span><small id="status-sub"></small>
+          </button>
+          <div class="popover pop-left" id="status-pop" hidden>
+            <p class="status-pop-what">在背景抓 GMGN 标记的聪明钱、KOL 和你名单里钱包的买卖，帮钱包评分，用来算「几个高手同时在买同一颗币」。数据只存在这台电脑，不发讯、不下单。暂停后信号就不会更新。</p>
+            <p id="status-note" class="status-pop-note"></p>
+            <div id="status-chips" class="status-chips"></div>
+            <button id="pause-btn" class="btn btn-sm" type="button">暂停收集</button>
+          </div>
+        </div>
+      </div>
+      <form class="quick-search" action="./analyze.html" method="get" role="search">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="M20.5 20.5l-4.8-4.8"/></svg>
+        <input name="q" type="text" placeholder="查地址：粘贴钱包或 CA" autocomplete="off" spellcheck="false" aria-label="查地址">
+      </form>
+    </header>
+
+    <main class="page">
+      <div class="sm-controls">
+        <div class="tabs" role="tablist" aria-label="查看">
+          <button type="button" role="tab" data-tab="signals" aria-selected="true">信号</button>
+          <button type="button" role="tab" data-tab="feed" class="only-narrow" aria-selected="false">动态</button>
+          <button type="button" role="tab" data-tab="wallets" aria-selected="false">名单</button>
+          <button type="button" role="tab" data-tab="mine" aria-selected="false">挖掘</button>
+          <button type="button" role="tab" data-tab="review" aria-selected="false">覆盘</button>
+        </div>
+        <div class="sm-filters">
+          <div class="seg" id="chain-seg" role="group" aria-label="链">
+            <button type="button" data-chain="" aria-pressed="true">全部</button>
+            <button type="button" data-chain="bsc" aria-pressed="false">BSC</button>
+            <button type="button" data-chain="sol" aria-pressed="false">SOL</button>
+            <button type="button" data-chain="robinhood" aria-pressed="false">RH</button>
+          </div>
+          <div class="seg" id="window-seg" role="group" aria-label="时间窗">
+            <button type="button" data-window="900" aria-pressed="false">15 分</button>
+            <button type="button" data-window="1800" aria-pressed="false">30 分</button>
+            <button type="button" data-window="3600" aria-pressed="true">1 时</button>
+            <button type="button" data-window="14400" aria-pressed="false">4 时</button>
+            <button type="button" data-window="86400" aria-pressed="false">24 时</button>
+          </div>
+          <div class="pop-anchor" id="filter-btn">
+            <button class="btn btn-sm btn-ghost" type="button" data-popover="filter-pop" aria-expanded="false" aria-controls="filter-pop">筛选 <span id="filter-badge" class="count"></span></button>
+            <div class="popover filter-pop" id="filter-pop" hidden>
+              <label>只看发射台新币<button type="button" class="toggle" id="lp-toggle" aria-pressed="true" aria-label="只看发射台新币"></button></label>
+              <p class="filter-help">pump、four.meme、flap 这类发射台出来的新币。关掉会连代币化股票、老币都列进来。</p>
+              <label>单笔至少
+                <select id="min-usd">
+                  <option value="10">$10</option>
+                  <option value="20">$20</option>
+                  <option value="50" selected>$50</option>
+                  <option value="100">$100</option>
+                  <option value="300">$300</option>
+                  <option value="1000">$1,000</option>
+                </select>
+              </label>
+              <label>市值上限
+                <select id="max-mcap">
+                  <option value="0" selected>不限</option>
+                  <option value="500000">$500K</option>
+                  <option value="1000000">$1M</option>
+                  <option value="2000000">$2M</option>
+                  <option value="5000000">$5M</option>
+                  <option value="20000000">$20M</option>
+                </select>
+              </label>
+              <p class="filter-help">预设不限，所有市值都看。选了上限，超过的币不列进信号；实时动态照常显示，覆盘也照样记。</p>
+              <label>排除有机器人的信号<button type="button" class="toggle" id="nobot-toggle" aria-pressed="false" aria-label="排除有机器人的信号"></button></label>
+              <p class="filter-help">还拿着的钱包里只要有一个机器人（交易频率超过机器人门槛），这个信号就不列。覆盘照样记，可以在覆盘的「有没有机器人」分组比较。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="view view-live" aria-label="信号与动态">
+        <div class="col-signals">
+          <div class="col-head">
+            <h2>共识信号</h2>
+            <p id="signal-summary" class="col-sub"></p>
+            <button id="rules-btn" class="btn btn-text" type="button" aria-expanded="false" aria-controls="rules">怎么算的</button>
+          </div>
+          <div id="rules" class="rules" hidden></div>
+          <div id="signals" class="signals" aria-live="polite"></div>
+        </div>
+        <aside class="col-feed" aria-label="实时动态">
+          <div class="col-head">
+            <h2>实时动态</h2>
+            <div class="seg seg-small" id="feed-seg" role="group" aria-label="动态筛选">
+              <button type="button" data-feed="all" aria-pressed="true">全部</button>
+              <button type="button" data-feed="buy" aria-pressed="false">只看买进</button>
+              <button type="button" data-feed="mine" aria-pressed="false">我的名单</button>
+            </div>
+          </div>
+          <ol id="feed" class="feed"></ol>
+        </aside>
+      </section>
+
+      <section class="view view-wallets" aria-label="钱包名单">
+        <div class="wallets-bar">
+          <div class="seg" id="group-seg" role="group" aria-label="名单分类">
+            <button type="button" data-group="watch" aria-pressed="true">我的名单</button>
+            <button type="button" data-group="top" aria-pressed="false">S 和 A 级</button>
+            <button type="button" data-group="mined" aria-pressed="false">挖到的</button>
+            <button type="button" data-group="gmgn" aria-pressed="false">GMGN 已评分</button>
+            <button type="button" data-group="muted" aria-pressed="false">已静音</button>
+          </div>
+          <input id="wallet-q" type="search" placeholder="搜索地址、标签、名字" autocomplete="off" aria-label="搜索钱包">
+          <label class="select-wrap">排序
+            <select id="wallet-sort">
+              <option value="score">分数</option>
+              <option value="recent">最近交易</option>
+              <option value="profit">30 天盈利</option>
+            </select>
+          </label>
+        </div>
+        <p id="wallet-summary" class="col-sub"></p>
+        <div id="wallet-list" class="wallet-list"></div>
+        <details class="add-box">
+          <summary>手动加入钱包</summary>
+          <p class="hint">一行一个地址，0x 开头当 BSC，其他当 SOL。私人标签请到钱包库导入，会自动同步进名单。</p>
+          <textarea id="add-text" rows="5" spellcheck="false" aria-label="要加入的钱包地址"></textarea>
+          <div class="row-actions"><button id="add-btn" class="btn btn-primary" type="button">加入名单</button><span id="add-note" class="hint"></span></div>
+        </details>
+      </section>
+
+      <section class="view view-mine" aria-label="挖掘早期买家">
+        <div class="mine-intro">
+          <h2>从赚钱的土狗挖早期买家</h2>
+          <details>
+            <summary>挖掘怎么运作</summary>
+            <p>「排行＋热门」抓 GMGN 上最近 7 天冲上高市值的土狗，和 pump.fun 首页的热门币轮流排（两边都只挖最高市值到过设定门槛以上的），再加上钱包库里查过的币，逐颗看获利排行；24 小时内扫过的币会跳过，改扫排名后面的，所以每轮都是新的一批。「FOMO 热门」挖你从 FOMO 热门清单用书签带回来的币。同一个地址在 2 颗以上都赚超过 $1,000、翻倍，而且平均进场市值不到最高市值的 3 成，就列成候选并自动评分；以前扫过的币也算进去。不知道总供给量的币（pump.fun、FOMO 热门常见）会先多花 GMGN 1 点查币信息，才能判断是不是早期进场。开发者捆绑、新开的一次性钱包、靠转入筹码赚的都会排除。这轮才变成候选的地址会标「新出现」，排在最前面。<span id="mine-rule-note" hidden>获利只算真的卖掉赚到的（还没卖的帐面、转出去的都不算），所以买到貔貅、卖不掉的不会被当成赚钱。每颗币先花 1 点做 GMGN 安全检查：貔貅、卖不掉、卖税 5 成以上、SOL 冻结权限没放弃的整颗跳过；获利排行里卖出过的不到一半，也当成卖不掉。以前用旧规则挖到的命中，自动挖掘每轮会顺便重新验算最多 15 颗。</span></p>
+          </details>
+        </div>
+        <div class="mine-bar">
+          <div class="seg" id="mine-chain-seg" role="group" aria-label="挖掘的链">
+            <button type="button" data-mchain="bsc" aria-pressed="true">BSC</button>
+            <button type="button" data-mchain="sol" aria-pressed="false">SOL</button>
+            <button type="button" data-mchain="robinhood" aria-pressed="false">RH</button>
+          </div>
+          <div class="seg" id="mine-src-seg" role="group" aria-label="挖哪些币">
+            <button type="button" data-msrc="auto" aria-pressed="true">排行＋热门</button>
+            <button type="button" data-msrc="pump" aria-pressed="false">pump.fun 热门</button>
+            <button type="button" data-msrc="fomo" aria-pressed="false">FOMO 热门</button>
+          </div>
+          <label class="rv-toggle" id="mine-all-wrap" title="打开后按「开始挖掘」会把 BSC、SOL、RH 依序挖完，选的链先挖；指定几颗币时只挖选的链" hidden>三条链一起挖<button type="button" class="toggle" id="mine-all" aria-pressed="true" aria-label="三条链一起挖"></button></label>
+          <button id="mine-btn" class="btn btn-primary" type="button">开始挖掘</button>
+          <span id="mine-note" class="hint"></span>
+        </div>
+        <div id="mine-fomo" class="mine-fomo" hidden>
+          <ol class="fomo-steps">
+            <li>把 <a id="fomo-hot-bm" class="bm-link">热门</a> 拖到书签列（第一次用才需要；书签列没出现就按 Ctrl+Shift+B）。</li>
+            <li>打开任何一颗币的 <a href="https://fomo.family/" target="_blank" rel="noopener">FOMO 币页</a>，左边点「代币 → 热门」，再按书签列的「热门」。它会把清单卷一遍，把每颗币的 CA 拷贝起来。</li>
+            <li>回到这里按 <button type="button" class="btn btn-sm btn-primary" id="fomo-hot-paste">从剪贴板粘贴</button>，或直接按 Ctrl+V，然后按「开始挖掘」。</li>
+            <li>绑 FOMO 名字：在 FOMO 左边点「排行榜」再按「热门」，回来一样粘贴。会用每个人的前三大持仓找他的持仓地址、绑成他的 FOMO 名字（绑到的地址直接加进钱包库）：SOL 在链上用数量反查（几分钟）；BSC／RH 用 GMGN 前 100 持有人比数量（一颗币约 13 秒，最多 60 颗，要比较久，这页开着就好）。</li>
+          </ol>
+          <p id="fomo-hot-status" class="hint" aria-live="polite">还没粘贴 FOMO 热门。</p>
+          <div id="fomo-board-box" hidden>
+            <p id="fomo-board-status" class="hint" aria-live="polite"></p>
+            <details id="fomo-board-rows" hidden><summary></summary><div class="table-wrap"></div></details>
+          </div>
+        </div>
+        <details class="add-box">
+          <summary>改成指定几颗币</summary>
+          <p class="hint">贴合约地址，空白或换行分隔，最多 40 颗。留空就用自动找的土狗。</p>
+          <textarea id="mine-cas" rows="3" spellcheck="false" aria-label="指定合约地址"></textarea>
+        </details>
+        <div id="mine-progress" class="mine-progress" hidden>
+          <div class="bar"><span id="mine-bar-fill"></span></div>
+          <p id="mine-step" class="hint"></p>
+        </div>
+        <p id="mine-summary" class="col-sub"></p>
+        <div id="mine-list" class="wallet-list"></div>
+      </section>
+
+      <section class="view view-review" aria-label="信号覆盘">
+        <div class="rv-head">
+          <div>
+            <h2>信号覆盘</h2>
+            <p id="rv-sched" class="col-sub">读取中</p>
+          </div>
+          <div class="rv-actions">
+            <div class="seg" id="rv-days-seg" role="group" aria-label="期间">
+              <button type="button" data-days="1" aria-pressed="false">1 天</button>
+              <button type="button" data-days="7" aria-pressed="true">7 天</button>
+              <button type="button" data-days="30" aria-pressed="false">30 天</button>
+              <button type="button" data-days="0" aria-pressed="false">全部</button>
+            </div>
+            <label class="select-wrap" id="rv-rule-wrap" hidden>卖法<select id="rv-rule"></select></label>
+            <label class="rv-toggle">含回补<button type="button" class="toggle" id="rv-backfill" aria-pressed="true" aria-label="含回补的信号"></button></label>
+            <button id="rv-run" class="btn btn-sm" type="button">现在覆盘</button>
+            <button id="rv-rules-btn" class="btn btn-text" type="button" aria-expanded="false" aria-controls="rv-rules">怎么算的</button>
+          </div>
+        </div>
+        <div id="rv-rules" class="rules" hidden></div>
+        <div id="rv-progress" class="mine-progress" hidden>
+          <div class="bar"><span id="rv-bar-fill"></span></div>
+          <p id="rv-step" class="hint"></p>
+        </div>
+        <div id="rv-stats" class="stats"></div>
+        <p id="rv-aux" class="rv-aux" hidden></p>
+        <section id="rv-sells-sec" class="rv-section rv-wide" aria-labelledby="rv-sells-h" hidden>
+          <h3 id="rv-sells-h">几种卖法比一比</h3>
+          <p id="rv-sells-note" class="hint"></p>
+          <div id="rv-sells" class="rv-sells"></div>
+        </section>
+        <div class="rv-grid">
+          <section class="rv-section" aria-labelledby="rv-groups-h">
+            <h3 id="rv-groups-h">哪种信号比较准</h3>
+            <div id="rv-groups"></div>
+          </section>
+          <section class="rv-section" aria-labelledby="rv-best-h">
+            <h3 id="rv-best-h">胜率最高的钱包</h3>
+            <p id="rv-best-note" class="hint"></p>
+            <div id="rv-best" class="wallet-list"></div>
+            <h3 id="rv-worst-h" class="rv-sub-h">胜率最低的钱包</h3>
+            <div id="rv-worst" class="wallet-list"></div>
+          </section>
+        </div>
+        <section class="rv-section rv-wide" aria-labelledby="rv-recent-h">
+          <h3 id="rv-recent-h">每一笔信号的结果</h3>
+          <div id="rv-recent" class="signals"></div>
+        </section>
+        <section class="rv-section rv-wide" aria-labelledby="rv-history-h">
+          <h3 id="rv-history-h">覆盘纪录</h3>
+          <div id="rv-history"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script src="./shell.js?v=20261025-annotate"></script>
+  <script src="./bookmarklet.js?v=20261112-fboard"></script>
+  <script src="./smart-money.js?v=20261112-libjoin"></script>
+</body>
+</html>

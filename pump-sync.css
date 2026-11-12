@@ -1,0 +1,31 @@
+.ps { max-width: 600px; margin: 0 auto; padding: 20px 16px 40px; }
+.ps-head h1 { margin: 0 0 4px; font-size: 20px; font-weight: 650; letter-spacing: 0.01em; }
+.ps-summary { margin: 0; color: var(--ink-2); font-size: 14px; }
+.ps-setup { margin-top: 18px; }
+.ps-setup p { margin: 0 0 12px; line-height: 1.65; }
+.ps-reason { padding: 10px 12px; border-radius: var(--r-box); background: var(--warn-soft); color: var(--warn); font-size: 14px; }
+.ps-steps { margin: 0 0 14px; padding-left: 22px; line-height: 1.7; }
+.ps-steps li { margin-bottom: 10px; }
+.ps-drag { margin-left: 8px; cursor: grab; vertical-align: middle; }
+.ps-drag:active { cursor: grabbing; }
+.ps-bar { height: 8px; margin: 18px 0 12px; overflow: hidden; border-radius: 4px; background: var(--raised-2); }
+.ps-bar span { display: block; width: 0; height: 100%; background: var(--gold); transition: width 0.3s var(--ease); }
+.ps-status { margin: 0 0 4px; font-size: 15px; }
+.ps-counts { margin: 0 0 14px; color: var(--ink-2); font-family: var(--font-num); font-size: 14px; font-variant-numeric: tabular-nums; }
+.ps-actions { display: flex; gap: 8px; margin-bottom: 16px; }
+.ps-log { margin: 0; padding: 0; border-top: 1px solid var(--line); list-style: none; }
+.ps-log li { padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 14px; }
+.ps-who { display: flex; justify-content: space-between; gap: 12px; }
+.ps-who span { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.ps-up { color: var(--up); }
+.ps-down { color: var(--down); }
+.ps-err { color: var(--warn); }
+.ps-detail { display: block; color: var(--ink-2); font-size: 13px; }
+.ps-addr { display: block; color: var(--muted); font-family: var(--font-mono); font-size: 12px; word-break: break-all; }
+.ps-board { margin-top: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-box); }
+.ps-board-sum { margin: 0; font-size: 14px; line-height: 1.6; }
+.ps-board-sum.muted { color: var(--ink-2); }
+.ps-board-more { margin-top: 8px; }
+.ps-board-more summary { cursor: pointer; color: var(--ink-2); font-size: 13px; }
+.ps-board-more .ps-log { margin-top: 8px; max-height: 320px; overflow-y: auto; }
+@media (prefers-reduced-motion: reduce) { .ps-bar span { transition: none; } }
