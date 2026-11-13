@@ -3417,10 +3417,11 @@ async function openLibraryWallet(chain, address) {
       <h3>上下游资金关联（只追主币与 USD 稳定币）</h3>
       <p class="muted">${escapeHtml(data.note)}</p>
       ${data.relationRule ? `<p class="muted">${escapeHtml(data.relationRule)}</p>` : ""}
+      ${data.spoofRule ? `<p class="muted">${escapeHtml(data.spoofRule)}</p>` : ""}
       <div class="compact-table trace-mobile-cards"><table><thead><tr><th>方向</th><th>地址</th><th>关系</th><th>数量</th><th>时间</th><th>证据</th><th>CA</th></tr></thead><tbody>
       ${[...data.upstream.map((rel) => relRow(rel, "上游")), ...data.downstream.map((rel) => relRow(rel, "下游"))].join("") || '<tr><td colspan="7">没有已记录的资金关联。</td></tr>'}
       </tbody></table></div>
-      <h3>共同上游资助的其他地址（${data.sharedFunder.length}，已排除交易所、高频服务钱包、灰尘转帐和给超过 ${data.funderMax || 20} 个钱包的上游）</h3>
+      <h3>共同上游资助的其他地址（${data.sharedFunder.length}，已排除交易所、高频服务钱包、仿冒地址、灰尘转帐和给超过 ${data.funderMax || 20} 个钱包的上游）</h3>
       ${data.sharedFunder.length ? `<ul>${data.sharedFunder.slice(0, 50).map((row) => `<li>${walletCell(row.address, w.chain)} ← ${walletCell(row.via, w.chain)}（${escapeHtml(fullText(row.ca))}）</li>`).join("")}</ul>` : '<p class="muted">无。</p>'}`;
     $("library-detail-close")?.addEventListener("click", () => { panel.hidden = true; });
     $("library-save").addEventListener("click", async () => {

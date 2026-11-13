@@ -234,7 +234,7 @@ REVIEW_RULES = [
     f"钱包排行：照选的卖法算跟这个钱包的模拟盈亏；样本少的往整体平均拉（每个钱包先当成多了 {WALLET_SHRINK} 笔平均的信号），至少 {WALLET_MIN_SIGNALS} 笔满 24 小时的才排；"
     "只算信号当下还拿着的钱包，同一颗币只算第一次，同一个 0x 地址 BSC 和 RH 合在一起算",
     f"相关钱包合成一组：一起出现在至少 {RELATED_MIN_SHARED} 个信号、而且占信号比较少那个的 {RELATED_OVERLAP:.0%} 以上（同进同出），"
-    f"或钱包库里有资金相关（直接转过钱，或同一个钱包给过两边钱；交易所、高频服务钱包、灰尘转帐、给超过 {RELATED_FUNDER_MAX} 个钱包的都不算）；同一组同一颗币只算一次",
+    f"或钱包库里有资金相关（直接转过钱，或同一个钱包给过两边钱；交易所、高频服务钱包、仿冒地址、灰尘转帐、给超过 {RELATED_FUNDER_MAX} 个钱包的都不算）；同一组同一颗币只算一次",
     "胜负只当辅助：先涨到 +30% 算胜、先跌到 −30% 算败、24 小时都没碰到算平；同一根 K 线两边都碰到，不知道哪个先，保守算败",
     f"旧版纪录没有倍数模拟：满 24 小时的每次覆盘从最早的开始重算，最多 {REJUDGE_MAX} 笔；页面会写还剩几笔",
     "服务器停过或刚上线，会用 3 天内的交易纪录往回补，标「回补」：用的是现在的钱包评分，可能比当下实时看到的好看，可以在筛选里排除",
@@ -323,7 +323,7 @@ def connect() -> sqlite3.Connection:
     if not _schema_ready:
         wl.connect().close()
         conn.executescript(SCHEMA)
-        conn.execute(wl.SERVICE_SCHEMA)
+        conn.executescript(wl.RELATION_SCHEMA)
         user_labels.ensure(conn)
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(sm_mine_hits)")}
         if "entry_mc" not in cols:

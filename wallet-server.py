@@ -1564,7 +1564,7 @@ def library_maintenance(first_delay: float = 300, every: float = 1800) -> None:
     time.sleep(first_delay)
     fetch = gmgn_paced
     while True:
-        for step in (lambda: wallet_library.relabel_if_stale(), wallet_library.classify_funders, lambda: wallet_library.refresh_tokens(fetch),
+        for step in (lambda: wallet_library.relabel_if_stale(), wallet_library.classify_funders, wallet_library.purge_spoofs, lambda: wallet_library.refresh_tokens(fetch),
                      lambda: wallet_library.check_quiet_stats(fetch), lambda: wallet_library.refresh_platform_strength(fetch),
                      lambda: wallet_library.refresh_pump_pnl(platform_match.pump_user_pnl), wallet_library.purge_bots,
                      lambda: wallet_library.check_bot_stats(fetch), wallet_library.purge_bots, wallet_library.refresh_follow_records,

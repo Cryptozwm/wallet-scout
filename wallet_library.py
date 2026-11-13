@@ -164,6 +164,10 @@ CREATE TABLE IF NOT EXISTS service_wallets (
   chain TEXT NOT NULL, address TEXT NOT NULL, service INTEGER DEFAULT 0, sent INTEGER, span_h REAL, note TEXT DEFAULT '',
   checked_at INTEGER, PRIMARY KEY (chain, address)
 );
+CREATE TABLE IF NOT EXISTS spoof_addresses (
+  chain TEXT NOT NULL, address TEXT NOT NULL, mimics TEXT DEFAULT '', victim TEXT DEFAULT '', reason TEXT DEFAULT '',
+  found_at INTEGER, PRIMARY KEY (chain, address)
+);
 CREATE TABLE IF NOT EXISTS tokens (
   chain TEXT NOT NULL, ca TEXT NOT NULL, symbol TEXT DEFAULT '', open_ts INTEGER, queried_at INTEGER, data_note TEXT DEFAULT '',
   PRIMARY KEY (chain, ca)
@@ -888,6 +892,7 @@ def ingest(payload: dict[str, Any]) -> dict[str, Any]:
                     num(rel.get("amount")), num(rel.get("ts")), str(rel.get("srcLabel") or ""), 1 if rel.get("publicEntity") else 0))
             for address in set(addresses):
                 recompute_labels(conn, chain, address)
+            refresh_spoofs(conn, now)
             conn.commit()
             total = conn.execute("SELECT COUNT(*) FROM wallets").fetchone()[0]
         finally:
@@ -1006,7 +1011,7 @@ def wallet_detail(payload: dict[str, Any]) -> dict[str, Any]:
             up = [dict(r) for r in conn.execute("SELECT * FROM relations WHERE chain=? AND dst=?", (chain, address))]
             down = [dict(r) for r in conn.execute("SELECT * FROM relations WHERE chain=? AND src=?", (chain, address))]
             for rel in up + down:
-                rel["noise"] = relation_noise(conn, chain, rel["src"], rel["asset"], rel["amount"], rel["public_entity"])
+                rel["noise"] = relation_noise(conn, chain, rel["src"], rel["asset"], rel["amount"], rel["public_entity"], rel["dst"])
             siblings = [dict(r) for r in conn.execute(
                 "SELECT r2.dst AS address, r2.src AS via, r2.ca FROM relations r1 JOIN relations r2 ON r1.chain=r2.chain AND r1.src=r2.src "
                 f"WHERE r1.chain=? AND r1.dst=? AND r1.rel_type='funding' AND r2.rel_type='funding' AND r2.dst<>? AND {rel_counts_sql('r1')} "
@@ -1022,7 +1027,7 @@ def wallet_detail(payload: dict[str, Any]) -> dict[str, Any]:
     wallet["card"] = wallet_card(row, wallet["labels"], card_sm, card_follow)
     wallet["acct"] = acct
     return {"ok": True, "wallet": wallet, "appearances": apps, "upstream": up, "downstream": down, "linkReviews": reviews, "sameWallet": same,
-            "sharedFunder": siblings, "relationRule": RELATION_RULE, "funderMax": FUNDER_MAX, "rules": RULES, "platRule": PLAT_RULE, "cardRule": CARD_RULE, "useLabels": USE_LABEL, "acctRule": PLAT_ACCT_RULE,
+            "sharedFunder": siblings, "relationRule": RELATION_RULE, "spoofRule": SPOOF_RULE, "funderMax": FUNDER_MAX, "rules": RULES, "platRule": PLAT_RULE, "cardRule": CARD_RULE, "useLabels": USE_LABEL, "acctRule": PLAT_ACCT_RULE,
             "note": "上下游与共同上游只代表资金关联，不代表同一主人。"}
 
 
@@ -1293,8 +1298,11 @@ def trace_ingest(payload: dict[str, Any]) -> dict[str, Any]:
         conn = connect()
         try:
             addresses: list[str] = []
+            spoofs = spoof_set(conn) - _spoof_protected(conn)
             for w in wallets:
                 address = norm(chain, w.get("address"))
+                if address in spoofs:
+                    continue
                 addresses.append(address)
                 tags = json.dumps(sorted({str(t) for t in (w.get("gmgnTags") or [])}))
                 conn.execute("INSERT INTO wallets(chain, address, name, twitter, first_seen, updated_at, gmgn_tags) VALUES (?,?,?,?,?,?,?) "
@@ -1332,6 +1340,7 @@ def trace_ingest(payload: dict[str, Any]) -> dict[str, Any]:
                 cas = conn.execute("SELECT COUNT(*) FROM appearances WHERE chain=? AND address=?", (chain, address)).fetchone()[0]
                 lookup.append({"address": address, "labels": effective_labels(row) if row else labels, "caCount": cas,
                                "name": row["name"] if row else "", "twitter": row["twitter"] if row else ""})
+            refresh_spoofs(conn, now)
             conn.commit()
             try:
                 import user_labels
@@ -1803,6 +1812,7 @@ SERVICE_SCHEMA = """CREATE TABLE IF NOT EXISTS service_wallets (
   checked_at INTEGER, PRIMARY KEY (chain, address)
 )"""
 RELATION_RULE = (f"资金关联照样存、照样列，但这几种不拿来把钱包连在一起：交易所等公开实体（GMGN 标注）；"
+                 f"仿冒地址（跟钱包真正的往来对象前后几码一样、转灰尘骗人拷贝的投毒地址）；"
                  f"高频服务钱包（不在钱包库，EVM 送出 ≥ {SERVICE_EVM_SENT:,} 笔，或 SOL 最近 1,000 笔在 {SERVICE_SOL_HOURS} 小时内）；"
                  f"灰尘转帐（主币约不到 $1、稳定币不到 $1）；共同上游另外要给 ≤ {FUNDER_MAX} 个钱包。")
 
@@ -1810,7 +1820,8 @@ RELATION_RULE = (f"资金关联照样存、照样列，但这几种不拿来把�
 def rel_counts_sql(alias: str) -> str:
     dust = " OR ".join(f"({alias}.asset='{a}' AND {alias}.amount<{v})" for a, v in RELATION_DUST.items())
     return (f"{alias}.public_entity=0 AND NOT ({alias}.amount IS NOT NULL AND ({dust})) "
-            f"AND NOT EXISTS (SELECT 1 FROM service_wallets sw WHERE sw.chain={alias}.chain AND sw.address={alias}.src AND sw.service=1)")
+            f"AND NOT EXISTS (SELECT 1 FROM service_wallets sw WHERE sw.chain={alias}.chain AND sw.address={alias}.src AND sw.service=1) "
+            f"AND NOT EXISTS (SELECT 1 FROM spoof_addresses sp WHERE sp.chain={alias}.chain AND sp.address IN ({alias}.src, {alias}.dst))")
 
 
 def service_note(chain: str, sent: Any, span_h: Any) -> str:
@@ -1819,9 +1830,12 @@ def service_note(chain: str, sent: Any, span_h: Any) -> str:
     return f"高频服务钱包（送出 {int(sent or 0):,} 笔）"
 
 
-def relation_noise(conn: sqlite3.Connection, chain: str, src: str, asset: Any, amount: Any, public_entity: Any = False) -> str:
+def relation_noise(conn: sqlite3.Connection, chain: str, src: str, asset: Any, amount: Any, public_entity: Any = False, dst: str = "") -> str:
     if public_entity:
         return "交易所等公开实体"
+    spoof = conn.execute("SELECT reason FROM spoof_addresses WHERE chain=? AND address IN (?,?)", (chain, src, dst or src)).fetchone()
+    if spoof:
+        return spoof["reason"] or "仿冒地址"
     limit, value = RELATION_DUST.get(str(asset or "")), num(amount)
     if limit is not None and value is not None and value < limit:
         return "灰尘转帐"
@@ -1859,6 +1873,157 @@ def check_service(chain: str, address: str) -> tuple[int, int | None, float | No
         return (1 if len(sigs) >= 1000 and span is not None and span < SERVICE_SOL_HOURS else 0), len(sigs), span
     sent = int(_rpc(chain, "eth_getTransactionCount", [address, "latest"]), 16)
     return (1 if sent >= SERVICE_EVM_SENT else 0), sent, None
+
+
+SPOOF_EVM_CHARS = 6
+SPOOF_SOL_CHARS = 5
+SPOOF_STRICT_CHARS = 7
+SPOOF_SCHEMA = """CREATE TABLE IF NOT EXISTS spoof_addresses (
+  chain TEXT NOT NULL, address TEXT NOT NULL, mimics TEXT DEFAULT '', victim TEXT DEFAULT '', reason TEXT DEFAULT '',
+  found_at INTEGER, PRIMARY KEY (chain, address)
+)"""
+RELATION_SCHEMA = SERVICE_SCHEMA + ";\n" + SPOOF_SCHEMA + ";\n"
+SPOOF_RULE = (f"仿冒地址：同一个钱包的两个对手地址前后几码一样（EVM 合计 ≥ {SPOOF_EVM_CHARS} 码、SOL ≥ {SPOOF_SOL_CHARS} 码），"
+              f"只转灰尘的那个、或两个都有金额时晚出现的那个（≥ {SPOOF_STRICT_CHARS} 码、不是 0000…8888 这种靓号）就是模仿的假地址；"
+              f"有扫描纪录、有名字、你标过的、平台用户、公开实体不算。纪录照列、不拿来连钱包，也不留在钱包库（先封存、可还原）。")
+
+
+def _is_dust(asset: Any, amount: Any) -> bool:
+    limit, value = RELATION_DUST.get(str(asset or "")), num(amount)
+    return limit is not None and value is not None and value < limit
+
+
+def _addr_body(chain: str, address: str) -> str:
+    return address if chain == "Solana" else address[2:].lower()
+
+
+def _common_ends(a: str, b: str) -> tuple[int, int]:
+    n = min(len(a), len(b))
+    p = 0
+    while p < n and a[p] == b[p]:
+        p += 1
+    s = 0
+    while s < n - p and a[-1 - s] == b[-1 - s]:
+        s += 1
+    return p, s
+
+
+def _spoof_protected(conn: sqlite3.Connection) -> set[str]:
+    keep = user_marked(conn)
+    keep |= {norm(r[0], r[1]) for r in conn.execute("SELECT DISTINCT chain, address FROM appearances")}
+    keep |= {norm(r[0], r[1]) for r in conn.execute("SELECT chain, address FROM wallets WHERE COALESCE(name,'')<>'' OR COALESCE(twitter,'')<>''")}
+    keep |= {norm(r[0], r[1]) for r in conn.execute("SELECT chain, address FROM platform_names")}
+    return keep
+
+
+def find_spoofs(conn: sqlite3.Connection) -> dict[tuple[str, str], tuple[str, str, str]]:
+    peers: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    for r in conn.execute("SELECT chain, src, dst, asset, amount, ts, public_entity FROM relations"):
+        fam = "Solana" if r["chain"] == "Solana" else "evm"
+        dust = _is_dust(r["asset"], r["amount"])
+        for victim, other in ((r["dst"], r["src"]), (r["src"], r["dst"])):
+            d = peers.setdefault((fam, victim), {}).setdefault(other, {"dust": True, "ts": None, "chains": set(), "public": False})
+            d["dust"] = d["dust"] and dust
+            if r["ts"]:
+                d["ts"] = r["ts"] if d["ts"] is None else min(d["ts"], r["ts"])
+            d["chains"].add(r["chain"])
+            d["public"] = d["public"] or bool(r["public_entity"])
+    keep = _spoof_protected(conn)
+    found: dict[tuple[str, str], tuple[str, str, str]] = {}
+
+    def mark(info: dict[str, Any], address: str, mimics: str, victim: str, reason: str) -> None:
+        for chain in info["chains"]:
+            if norm(chain, address) in keep:
+                return
+        for chain in info["chains"]:
+            prev = found.get((chain, address))
+            if prev is None or (mimics and not prev[0]):
+                found[(chain, address)] = (mimics, victim, reason)
+
+    for (fam, victim), others in peers.items():
+        if len(others) < 2:
+            continue
+        tail, need = (2, SPOOF_SOL_CHARS) if fam == "Solana" else (3, SPOOF_EVM_CHARS)
+        buckets: dict[str, list[str]] = {}
+        for other in others:
+            buckets.setdefault(_addr_body(fam, other)[-tail:], []).append(other)
+        for group in buckets.values():
+            for i, a in enumerate(group):
+                for b in group[i + 1:]:
+                    ba, bb = _addr_body(fam, a), _addr_body(fam, b)
+                    p, s = _common_ends(ba, bb)
+                    da, db = others[a], others[b]
+                    if p + s < need or da["public"] or db["public"]:
+                        continue
+                    if da["dust"] and db["dust"]:
+                        mark(da, a, "", victim, f"仿冒地址（跟 {b} 前 {p} 后 {s} 码一样，两个都只转灰尘）")
+                        mark(db, b, "", victim, f"仿冒地址（跟 {a} 前 {p} 后 {s} 码一样，两个都只转灰尘）")
+                    elif da["dust"] or db["dust"]:
+                        fake, real = (a, b) if da["dust"] else (b, a)
+                        mark(others[fake], fake, real, victim, f"仿冒地址（模仿 {real}，前 {p} 后 {s} 码一样、只转灰尘）")
+                    elif (p + s >= SPOOF_STRICT_CHARS and not (len(set(ba[:p])) <= 1 and len(set(ba[len(ba) - s:])) <= 1)
+                          and da["ts"] and db["ts"] and da["ts"] != db["ts"]):
+                        fake, real = (a, b) if da["ts"] > db["ts"] else (b, a)
+                        mark(others[fake], fake, real, victim, f"仿冒地址（模仿 {real}，前 {p} 后 {s} 码一样、比它晚出现）")
+    return found
+
+
+def refresh_spoofs(conn: sqlite3.Connection, now: int | None = None) -> int:
+    now = int(now if now is not None else time.time())
+    found = find_spoofs(conn)
+    conn.execute("DELETE FROM spoof_addresses")
+    conn.executemany("INSERT INTO spoof_addresses VALUES (?,?,?,?,?,?)",
+                     [(chain, address, m, v, reason, now) for (chain, address), (m, v, reason) in found.items()])
+    return len(found)
+
+
+def spoof_set(conn: sqlite3.Connection) -> set[str]:
+    return {norm(r[0], r[1]) for r in conn.execute("SELECT chain, address FROM spoof_addresses")}
+
+
+def purge_spoofs(now: float | None = None, dry_run: bool = False) -> dict[str, Any]:
+    now = int(now if now is not None else time.time())
+    with LOCK:
+        conn = connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            found = refresh_spoofs(conn, now)
+            spoofs = spoof_set(conn) - _spoof_protected(conn)
+            due = sorted((r["chain"], r["address"]) for r in conn.execute("SELECT chain, address FROM wallets") if norm(r["chain"], r["address"]) in spoofs)
+            result: dict[str, Any] = {"ok": True, "at": now, "spoofs": found, "due": len(due), "deleted": 0, "archive": "", "dryRun": dry_run}
+            if dry_run:
+                conn.rollback()
+                return result | {"addresses": [f"{c} {a}" for c, a in due]}
+            if due:
+                wallets = [dict(r) for key in due for r in conn.execute("SELECT * FROM wallets WHERE chain=? AND address=?", key)]
+                apps = [dict(r) for key in due for r in conn.execute("SELECT * FROM appearances WHERE chain=? AND address=?", key)]
+                reasons = {f"{r['chain']} {r['address']}": r["reason"] for r in conn.execute("SELECT * FROM spoof_addresses")}
+                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+                path = ARCHIVE_DIR / f"spoofs-{_local_time(now, '%Y%m%d-%H%M%S')}.json.gz"
+                blob = gzip.compress(json.dumps({"version": 1, "kind": "spoof", "prunedAt": now, "rule": SPOOF_RULE, "wallets": wallets, "appearances": apps,
+                                                 "reasons": {k: reasons.get(k, "") for k in (f"{c} {a}" for c, a in due)}}, ensure_ascii=False).encode("utf-8"))
+                tmp = path.with_suffix(".tmp")
+                with open(tmp, "wb") as fh:
+                    fh.write(blob)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                tmp.replace(path)
+                back = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+                if len(back.get("wallets") or []) != len(wallets) or len(back.get("appearances") or []) != len(apps):
+                    raise RuntimeError("封存文件读回笔数不符，这次不删")
+                for key in due:
+                    conn.execute("DELETE FROM appearances WHERE chain=? AND address=?", key)
+                    conn.execute("DELETE FROM wallets WHERE chain=? AND address=?", key)
+                result.update({"deleted": len(wallets), "archive": path.name})
+            if due or not _state_get(conn, "spoofs:last"):
+                _state_put(conn, "spoofs:last", result)
+            conn.commit()
+            return result
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def classify_funders(limit: int = SERVICE_BATCH) -> dict[str, Any]:
