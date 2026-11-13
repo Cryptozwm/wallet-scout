@@ -519,5 +519,9 @@ def handle(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if path == "/api/fomo/board-import":
         return start(payload.get("board"))
     if path == "/api/fomo/board-status":
-        return {"ok": True, "job": _snapshot()}
+        try:
+            stored = wallet_library.fomo_board_pnl_stats()
+        except Exception:
+            stored = None
+        return {"ok": True, "job": _snapshot(), "stored": stored}
     raise ValueError("找不到此 API")

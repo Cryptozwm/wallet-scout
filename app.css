@@ -1345,6 +1345,11 @@ body[data-tab="review"] #window-seg, body[data-tab="review"] #filter-btn { displ
 .lib-bm-text small { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .lib-bm-more { flex: 1 1 300px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.8; }
 .lib-bm-more .bm-link { margin: 0 2px; }
+.lib-bm-stack { display: flex; flex-direction: column; gap: 12px; flex: 1 1 440px; min-width: 0; }
+.lib-bm-stack .lib-bm-main { flex: none; }
+.lib-bm-stack .lib-bm-main + .lib-bm-main { padding-top: 12px; border-top: 1px solid var(--line); }
+.lib-bm-btn { flex: none; min-width: 64px; justify-content: center; }
+.lib-bm-text .lib-bm-run { color: var(--ink); }
 
 dialog.sheet.sheet-wide { width: min(880px, calc(100vw - 28px)); }
 .cleanup-table { max-height: 420px; overflow: auto; }

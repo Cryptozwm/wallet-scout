@@ -2477,6 +2477,26 @@ def fomo_pnl_for(platform_rows: list[dict[str, Any]] | None, index: dict[str, di
     return out or None
 
 
+def fomo_board_pnl_stats() -> dict[str, Any]:
+    with LOCK:
+        conn = connect()
+        try:
+            rows = conn.execute("SELECT DISTINCT p.chain, p.address, p.handle FROM platform_names p JOIN wallets w "
+                                "ON w.chain=p.chain AND w.address=p.address WHERE p.platform='FOMO'").fetchall()
+            periods: dict[str, set[str]] = {}
+            last = 0
+            for r in conn.execute("SELECT handle, period, at FROM fomo_board_pnl"):
+                periods.setdefault(r["handle"], set()).add(r["period"])
+                last = max(last, int(r["at"] or 0))
+        finally:
+            conn.close()
+    wallets: dict[tuple[str, str], set[str]] = {}
+    for r in rows:
+        wallets.setdefault((r["chain"], r["address"]), set()).update(periods.get(str(r["handle"] or "").lower(), set()))
+    return {"total": len(wallets), "withPnl": sum(1 for v in wallets.values() if v), "withAll": sum(1 for v in wallets.values() if "all" in v),
+            "handles": len(periods), "lastAt": last or None}
+
+
 def rename_platform_handle(conn: sqlite3.Connection, chain: str, address: str, platform: str, new: str) -> list[str]:
     rows = conn.execute("SELECT * FROM platform_names WHERE chain=? AND address=? AND platform=?", (chain, address, platform)).fetchall()
     if not rows or not new:

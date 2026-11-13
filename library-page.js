@@ -329,6 +329,17 @@ function pumpSyncProgressText(r) {
   return `${head}，还有 ${due} 位要算。`;
 }
 
+function fomoBoardStoredText(s) {
+  const total = Number(s && s.total) || 0, withPnl = Number(s && s.withPnl) || 0, withAll = Number(s && s.withAll) || 0;
+  const handles = Number(s && s.handles) || 0, at = Number(s && s.lastAt) || 0;
+  const head = total ? `钱包库里的 FOMO 用户 ${total} 位` : "钱包库里还没有 FOMO 用户";
+  if (!at) return `${head}，还没读过 FOMO 排行榜。`;
+  const d = new Date(at * 1000);
+  const two = (n) => String(n).padStart(2, "0");
+  const when = `${d.getMonth() + 1}/${d.getDate()} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  return `${head}，${withPnl} 位有 FOMO 排行榜盈利（${withAll} 位有「全部」榜）；排行榜上存了 ${handles} 人，上次读是 ${when}。`;
+}
+
 
 const BULK_SRC = { coin: "库内币加总", pnl30: "GMGN 30 天已实现", gm: "GMGN 历史总盈利", pf: "平台战绩", acct: "pump.fun 帐号" };
 const BULK_CHAIN = { Solana: "SOL", BSC: "BSC", Robinhood: "RH" };
@@ -401,7 +412,7 @@ if (typeof module === "object" && module.exports) {
   module.exports = { EXPORT_LABEL_SHORT, EXPORT_SKIP, EXPORT_DROPS, EXPORT_DEFAULT_DROPS, exportMoney, platformExportRemark, strengthExportRemark,
     walletExportRemark, libraryExportItems, libraryExportText, libraryExportCounts, platformExportText, platformExportCounts, botExportNote,
     exportSelection, exportDefaultSelection, exportPickHit, exportDropHit, EXPORT_PLAT_TIERS, platformProfit, platformProfitStats, acctTotal,
-    fomoBoardPnl, FOMO_PERIOD_NAME,
+    fomoBoardPnl, FOMO_PERIOD_NAME, fomoBoardStoredText,
     EXPORT_PLATFORMS, EXPORT_SINCE_DAYS, exportPlatMin, exportExpandPicks, exportExpandDrops, exportDropRows, exportPnlTier, exportWinrate, exportUsd, exportTierText, libraryExportPick,
     pumpSyncProgressText, bulkDuration, gmRefreshEstimate, gmRefreshText, cleanupSummary, cleanupChains, cleanupDetail, cleanupAppliedText, BULK_SRC };
 }
@@ -445,6 +456,95 @@ if (typeof document !== "undefined") {
     dialog?.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   })();
 
+  const libFomo = (() => {
+    const waiting = new Map();
+    let info = null;
+    window.addEventListener("message", (e) => {
+      if (e.source !== window || e.origin !== location.origin) return;
+      const m = e.data;
+      if (!m || m.from !== "wl-ext") return;
+      if (m.type === "wi-ext-ready") { info = m; return; }
+      if (m.type === "wi-ext-fomo-board-result" && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+    });
+    window.postMessage({ type: "wi-ext-hello" }, location.origin);
+    const has = (feature) => Boolean(info && (info.features || []).includes(feature));
+    function ask() {
+      const id = `fb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      return new Promise((resolve) => {
+        const late = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "插件 2 分钟没回应" }); }, 120000);
+        waiting.set(id, (m) => { clearTimeout(late); resolve(m); });
+        window.postMessage({ type: "wi-ext-fomo-board", id }, location.origin);
+      });
+    }
+    const st = { busy: false, msg: "" };
+    const subs = new Set();
+    const emit = (phase) => subs.forEach((fn) => { try { fn(phase); } catch (err) { console.error(err); } });
+    const say = (msg, phase = "msg") => { st.msg = msg; emit(phase); };
+    async function run() {
+      if (st.busy) return;
+      if (!has("fomo-board")) {
+        say(info ? `插件（${info.version || "旧版"}）太旧、没有这个功能：更新插件后刷新这页再按。`
+          : "要先装好钱包库插件（Chrome 扩充功能），装好刷新这页再按。");
+        return;
+      }
+      st.busy = true;
+      say("插件正在读 FOMO 排行榜（四个榜，约 10 秒）…");
+      try {
+        const r = await ask();
+        if (!r || !r.ok || !r.board) throw new Error((r && r.error) || "读 FOMO 排行榜失败");
+        const periods = Object.entries(r.board.periods || {}).map(([p, n]) => `${FOMO_PERIOD_NAME[p] || p} ${n} 位`).join("、");
+        const head = `读到 FOMO 排行榜 ${periods}，共 ${r.board.users.length} 人${r.why ? `（${r.why}，后面的榜没读）` : ""}`;
+        say(`${head}，存进钱包库中…`);
+        const res = await libraryPost("/api/fomo/board-import", { board: r.board });
+        let job = res.job || {};
+        const saved = job.pnlSaved || 0;
+        say(`${head}；存了 ${saved} 笔 FOMO 盈利，正在绑新名字（Solana 链上反查、BSC／Robinhood 问 GMGN，会跑几分钟）…`, "saved");
+        for (let i = 0; i < 400 && job.running; i += 1) {
+          await new Promise((ok) => setTimeout(ok, 3000));
+          job = (await libraryPost("/api/fomo/board-status", {})).job || {};
+        }
+        st.msg = `${head}；存了 ${saved} 笔 FOMO 盈利，绑到 ${job.bound || 0} 个地址（新绑 ${job.added || 0}、新加进钱包库 ${job.libAdded || 0}）`
+          + `${job.error ? `；绑定出错：${job.error}` : ""}。`;
+      } catch (error) {
+        st.msg = `没补到：${error.message || error}`;
+      } finally {
+        st.busy = false;
+        emit("done");
+      }
+    }
+    return { st, run, on: (fn) => subs.add(fn) };
+  })();
+
+  (() => {
+    const btn = document.getElementById("lib-fomo-board"), out = document.getElementById("lib-fomo-stored"), msg = document.getElementById("lib-fomo-msg");
+    if (!btn || !out || !msg) return;
+    let busy = false;
+    async function refresh() {
+      if (busy) return;
+      busy = true;
+      try {
+        const r = await libraryPost("/api/fomo/board-status", {});
+        out.textContent = r.stored ? fomoBoardStoredText(r.stored) : "读不到 FOMO 排行榜盈利的数字（服务器是旧版，重新启动就有）。";
+      } catch (err) {
+        out.textContent = `读不到 FOMO 排行榜盈利（${err && err.message ? err.message : err}），刷新这页再试。`;
+      } finally {
+        busy = false;
+      }
+    }
+    function show() {
+      btn.disabled = libFomo.st.busy;
+      btn.textContent = libFomo.st.busy ? "读取中…" : "补盈利";
+      msg.textContent = libFomo.st.msg;
+      msg.hidden = !libFomo.st.msg;
+    }
+    btn.addEventListener("click", () => libFomo.run());
+    libFomo.on((phase) => { show(); if (phase !== "msg") refresh(); });
+    show();
+    refresh();
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refresh(); });
+    setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 60000);
+  })();
+
   (() => {
     const dialog = document.getElementById("platform-export-dialog");
     if (!dialog || !document.getElementById("export-picks")) return;
@@ -462,31 +562,7 @@ if (typeof document !== "undefined") {
     const read = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
     const write = (key, value) => { try { localStorage.setItem(key, value); } catch {  } };
     const zeroMin = () => exportPlatMin(0);
-    const libBridge = (() => {
-      const waiting = new Map();
-      let info = null;
-      window.addEventListener("message", (e) => {
-        if (e.source !== window || e.origin !== location.origin) return;
-        const m = e.data;
-        if (!m || m.from !== "wl-ext") return;
-        if (m.type === "wi-ext-ready") { info = m; return; }
-        if (m.type === "wi-ext-fomo-board-result" && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
-      });
-      window.postMessage({ type: "wi-ext-hello" }, location.origin);
-      return {
-        has: (feature) => Boolean(info && (info.features || []).includes(feature)),
-        get version() { return info ? info.version : ""; },
-        fomoBoard() {
-          const id = `fb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-          return new Promise((resolve) => {
-            const late = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "插件 2 分钟没回应" }); }, 120000);
-            waiting.set(id, (m) => { clearTimeout(late); resolve(m); });
-            window.postMessage({ type: "wi-ext-fomo-board", id }, location.origin);
-          });
-        },
-      };
-    })();
-    const board = { busy: false, msg: "" };
+    const board = libFomo.st;
     const profitMode = () => (state.platUnknown === "gmgn" ? "gmgn" : "");
     const state = { wallets: [], names: [], groupOf: {}, labelName: {}, highFreq: EXPORT_HIGH_FREQ, output: { count: 0, text: "" }, now: Date.now() / 1000,
       picks: null, drops: null, platMin: zeroMin(), platUnknown: false, since: 0, seen: new Set(),
@@ -709,43 +785,10 @@ if (typeof document !== "undefined") {
       render();
     }
 
-    async function fomoBoardFill() {
-      if (board.busy) return;
-      if (!libBridge.has("fomo-board")) {
-        board.msg = libBridge.version ? `插件是 ${libBridge.version}，要 1.3.21 以上才有这个：插件会自己更新，等半分钟刷新这页再按。`
-          : "要先装好钱包库插件（Chrome 扩充功能），装好刷新这页再按。";
-        render();
-        return;
-      }
-      board.busy = true;
-      board.msg = "插件正在读 FOMO 排行榜（四个榜，约 10 秒）…";
-      render();
-      try {
-        const r = await libBridge.fomoBoard();
-        if (!r || !r.ok || !r.board) throw new Error((r && r.error) || "读 FOMO 排行榜失败");
-        const periods = Object.entries(r.board.periods || {}).map(([p, n]) => `${FOMO_PERIOD_NAME[p] || p} ${n} 位`).join("、");
-        const head = `读到 FOMO 排行榜 ${periods}，共 ${r.board.users.length} 人${r.why ? `（${r.why}，后面的榜没读）` : ""}`;
-        board.msg = `${head}，存进钱包库中…`;
-        render();
-        const res = await libraryPost("/api/fomo/board-import", { board: r.board });
-        let job = res.job || {};
-        const saved = job.pnlSaved || 0;
-        board.msg = `${head}；存了 ${saved} 笔 FOMO 盈利，正在绑新名字（Solana 链上反查、BSC／Robinhood 问 GMGN，会跑几分钟）…`;
-        await load();
-        for (let i = 0; i < 400 && job.running; i += 1) {
-          await new Promise((ok) => setTimeout(ok, 3000));
-          job = (await libraryPost("/api/fomo/board-status", {})).job || {};
-        }
-        board.msg = `${head}；存了 ${saved} 笔 FOMO 盈利，绑到 ${job.bound || 0} 个地址（新绑 ${job.added || 0}、新加进钱包库 ${job.libAdded || 0}）`
-          + `${job.error ? `；绑定出错：${job.error}` : ""}。`;
-        await load();
-      } catch (error) {
-        board.msg = `没补到：${error.message || error}`;
-      } finally {
-        board.busy = false;
-        render();
-      }
-    }
+    libFomo.on((phase) => {
+      if (!dialog.open || !state.picks) return;
+      if (phase === "saved" || phase === "done") load(); else render();
+    });
 
     byId("open-platform-export")?.addEventListener("click", () => { if (!dialog.open) dialog.showModal(); load(); });
     byId("platform-export-close")?.addEventListener("click", () => dialog.close());
@@ -755,7 +798,7 @@ if (typeof document !== "undefined") {
       const button = event.target.closest("button[data-pick]");
       const tier = event.target.closest("button[data-plat-min]");
       const unknown = event.target.closest("button[data-plat-unknown]");
-      if (event.target.closest("button[data-fomo-board]")) { fomoBoardFill(); return; }
+      if (event.target.closest("button[data-fomo-board]")) { libFomo.run(); return; }
       if (all) {
         const keys = all.dataset.pickAll.split(",");
         const on = !keys.every((key) => state.picks.has(key));

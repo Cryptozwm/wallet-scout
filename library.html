@@ -7,7 +7,7 @@
   <link rel="icon" href="data:,">
   <title>钱包库｜MEME 钱包侦查</title>
   <script src="./theme-boot.js?v=20261025-ui"></script>
-  <link rel="stylesheet" href="./app.css?v=20261112-libtools">
+  <link rel="stylesheet" href="./app.css?v=20261113-fomocard">
 </head>
 <body data-page="library">
   <nav class="rail" aria-label="主要功能">
@@ -44,13 +44,24 @@
         </div>
       </form>
       <p class="trace-data-note" id="library-status" role="status" aria-live="polite"></p>
-      <section class="lib-bm" aria-label="书签">
-        <div class="lib-bm-main">
-          <a class="btn btn-primary lib-bm-drag" id="lib-bm-pnl" href="./pump-sync.html" title="按住拖到书签列">盈利</a>
-          <div class="lib-bm-text">
-            <strong>pump.fun 帐号总盈亏</strong>
-            <span id="lib-bm-pump" aria-live="polite">读取进度…</span>
-            <small>把「盈利」按住拖到书签列（书签列没出现就按 Ctrl+Shift+B），到任何 pump.fun 页按一下：会开小窗口自动算，每算好 5 位就存回钱包库；小窗口关掉就停，下次按会接着算。</small>
+      <section class="lib-bm" aria-label="平台盈利与书签">
+        <div class="lib-bm-stack">
+          <div class="lib-bm-main">
+            <a class="btn btn-primary lib-bm-drag" id="lib-bm-pnl" href="./pump-sync.html" title="按住拖到书签列">盈利</a>
+            <div class="lib-bm-text">
+              <strong>pump.fun 帐号总盈亏</strong>
+              <span id="lib-bm-pump" aria-live="polite">读取进度…</span>
+              <small>把「盈利」按住拖到书签列（书签列没出现就按 Ctrl+Shift+B），到任何 pump.fun 页按一下：会开小窗口自动算，每算好 5 位就存回钱包库；小窗口关掉就停，下次按会接着算。</small>
+            </div>
+          </div>
+          <div class="lib-bm-main">
+            <button class="btn btn-primary lib-bm-btn" type="button" id="lib-fomo-board">补盈利</button>
+            <div class="lib-bm-text">
+              <strong>FOMO 排行榜盈利</strong>
+              <span id="lib-fomo-stored" aria-live="polite">读取中…</span>
+              <span class="lib-bm-run" id="lib-fomo-msg" role="status" aria-live="polite" hidden></span>
+              <small>按一下，插件会用你 Chrome 登录的 FOMO 读 24 小时／7 天／30 天／全部四个榜，把每个人 FOMO 自己算的盈利存进钱包库（导出到 DeBot／GMGN 的总盈利门槛会用到），顺便绑新名字。只有上榜的人补得到；要装钱包库插件、Chrome 要登录 FOMO。</small>
+            </div>
           </div>
         </div>
         <p class="lib-bm-more">另外两颗也在这里拖：<a class="bm-link" id="lib-bm-hold" href="./analyze.html">持币</a> 在 FOMO 或 pump.fun 的币页按，查这颗币的平台持有人；<a class="bm-link" id="lib-bm-hot" href="./smart-money.html">热门</a> 在 FOMO 页按，给聪明钱的挖掘用。</p>
@@ -195,6 +206,6 @@
   <script src="./shell.js?v=20261111-card"></script>
   <script src="./wallet-investigator.js?v=20261112-libtools"></script>
   <script src="./bookmarklet.js?v=20261112-fboard"></script>
-  <script src="./library-page.js?v=20261113-fomofill"></script>
+  <script src="./library-page.js?v=20261113-fomocard"></script>
 </body>
 </html>
