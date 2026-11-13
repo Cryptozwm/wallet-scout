@@ -160,6 +160,10 @@ CREATE TABLE IF NOT EXISTS relations (
   src_label TEXT DEFAULT '', public_entity INTEGER DEFAULT 0,
   PRIMARY KEY (chain, src, dst, rel_type, ca)
 );
+CREATE TABLE IF NOT EXISTS service_wallets (
+  chain TEXT NOT NULL, address TEXT NOT NULL, service INTEGER DEFAULT 0, sent INTEGER, span_h REAL, note TEXT DEFAULT '',
+  checked_at INTEGER, PRIMARY KEY (chain, address)
+);
 CREATE TABLE IF NOT EXISTS tokens (
   chain TEXT NOT NULL, ca TEXT NOT NULL, symbol TEXT DEFAULT '', open_ts INTEGER, queried_at INTEGER, data_note TEXT DEFAULT '',
   PRIMARY KEY (chain, ca)
@@ -794,7 +798,7 @@ def cross_match(conn: sqlite3.Connection, chain: str, ca: str, addresses: list[s
     for address, sources in funders.items():
         for source in sources:
             funder = source["src"]
-            if source.get("public_entity"):
+            if relation_noise(conn, chain, funder, source.get("asset"), source.get("amount"), source.get("public_entity")):
                 continue
             row = conn.execute("SELECT * FROM wallets WHERE chain=? AND address=?", (chain, funder)).fetchone()
             if row:
@@ -802,8 +806,8 @@ def cross_match(conn: sqlite3.Connection, chain: str, ca: str, addresses: list[s
                 if flagged:
                     links.append({"address": address, "relation": "资金关联：上游资助者是库内标记地址", "linked": funder,
                                   "linkedLabels": flagged, "evidence": source.get("evidence", ""), "txHash": source.get("tx_hash", ""), "otherCas": []})
-            siblings = conn.execute(
-                "SELECT dst, ca FROM relations WHERE chain=? AND src=? AND rel_type='funding' AND ca<>? AND dst<>?",
+            siblings = [] if funder_fanout(conn, chain, funder) > FUNDER_MAX else conn.execute(
+                f"SELECT r.dst, r.ca FROM relations r WHERE r.chain=? AND r.src=? AND r.rel_type='funding' AND r.ca<>? AND r.dst<>? AND {rel_counts_sql('r')}",
                 (chain, funder, ca, address)).fetchall()
             for sib in siblings:
                 srow = conn.execute("SELECT * FROM wallets WHERE chain=? AND address=?", (chain, sib["dst"])).fetchone()
@@ -833,6 +837,7 @@ def ingest(payload: dict[str, Any]) -> dict[str, Any]:
                 if rel.get("type") == "funding" and rel.get("src") and rel.get("dst"):
                     funders.setdefault(norm(chain, rel["dst"]), []).append({
                         "src": norm(chain, rel["src"]), "public_entity": bool(rel.get("publicEntity")),
+                        "asset": str(rel.get("asset") or ""), "amount": num(rel.get("amount")),
                         "evidence": rel.get("evidence", ""), "tx_hash": rel.get("txHash", "")})
             match = cross_match(conn, chain, ca, addresses, funders)
             blocked, marked, sm = bot_blocklist(conn), bot_keep(conn), sm_activity(conn)
@@ -1000,10 +1005,13 @@ def wallet_detail(payload: dict[str, Any]) -> dict[str, Any]:
                     for a, e in zip(raw, eff)]
             up = [dict(r) for r in conn.execute("SELECT * FROM relations WHERE chain=? AND dst=?", (chain, address))]
             down = [dict(r) for r in conn.execute("SELECT * FROM relations WHERE chain=? AND src=?", (chain, address))]
+            for rel in up + down:
+                rel["noise"] = relation_noise(conn, chain, rel["src"], rel["asset"], rel["amount"], rel["public_entity"])
             siblings = [dict(r) for r in conn.execute(
                 "SELECT r2.dst AS address, r2.src AS via, r2.ca FROM relations r1 JOIN relations r2 ON r1.chain=r2.chain AND r1.src=r2.src "
-                "WHERE r1.chain=? AND r1.dst=? AND r1.rel_type='funding' AND r2.rel_type='funding' AND r2.dst<>? AND r1.public_entity=0 LIMIT 200",
-                (chain, address, address))]
+                f"WHERE r1.chain=? AND r1.dst=? AND r1.rel_type='funding' AND r2.rel_type='funding' AND r2.dst<>? AND {rel_counts_sql('r1')} "
+                f"AND {rel_counts_sql('r2')} AND (SELECT COUNT(DISTINCT r3.dst) FROM relations r3 WHERE r3.chain=r1.chain AND r3.src=r1.src "
+                f"AND r3.rel_type='funding')<=? LIMIT 200", (chain, address, address, FUNDER_MAX))]
             reviews = _review_rows(conn, chain, address)
             same = [{"chain": r["chain"], "appearances": conn.execute("SELECT COUNT(*) FROM appearances WHERE chain=? AND address=?", (r["chain"], address)).fetchone()[0]}
                     for r in _rows_for(conn, chain, address) if r["chain"] != chain]
@@ -1014,7 +1022,7 @@ def wallet_detail(payload: dict[str, Any]) -> dict[str, Any]:
     wallet["card"] = wallet_card(row, wallet["labels"], card_sm, card_follow)
     wallet["acct"] = acct
     return {"ok": True, "wallet": wallet, "appearances": apps, "upstream": up, "downstream": down, "linkReviews": reviews, "sameWallet": same,
-            "sharedFunder": siblings, "rules": RULES, "platRule": PLAT_RULE, "cardRule": CARD_RULE, "useLabels": USE_LABEL, "acctRule": PLAT_ACCT_RULE,
+            "sharedFunder": siblings, "relationRule": RELATION_RULE, "funderMax": FUNDER_MAX, "rules": RULES, "platRule": PLAT_RULE, "cardRule": CARD_RULE, "useLabels": USE_LABEL, "acctRule": PLAT_ACCT_RULE,
             "note": "上下游与共同上游只代表资金关联，不代表同一主人。"}
 
 
@@ -1778,6 +1786,119 @@ def _gmgn_list(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, dict):
         return [x for x in (data.get("list") or (data.get("data") or {}).get("list") or []) if isinstance(x, dict)]
     return []
+
+
+SERVICE_EVM_SENT = 20_000
+SERVICE_SOL_HOURS = 72
+SERVICE_BATCH = 150
+SERVICE_RECHECK = 30 * 86400
+FUNDER_MAX = 20
+RELATION_DUST = {"BNB": 0.001, "ETH": 0.0003, "主币": 0.0003, "SOL": 0.003,
+                 "USDT": 1.0, "USDC": 1.0, "USD1": 1.0, "BUSD": 1.0, "FDUSD": 1.0}
+SERVICE_RPC = {"BSC": ("https://bsc-rpc.publicnode.com", "https://rpc-bsc.48.club"),
+               "Robinhood": ("https://robinhood-rpc.publicnode.com", "https://rpc.mainnet.chain.robinhood.com"),
+               "Solana": ("https://api.mainnet-beta.solana.com", "https://solana-rpc.publicnode.com")}
+SERVICE_SCHEMA = """CREATE TABLE IF NOT EXISTS service_wallets (
+  chain TEXT NOT NULL, address TEXT NOT NULL, service INTEGER DEFAULT 0, sent INTEGER, span_h REAL, note TEXT DEFAULT '',
+  checked_at INTEGER, PRIMARY KEY (chain, address)
+)"""
+RELATION_RULE = (f"资金关联照样存、照样列，但这几种不拿来把钱包连在一起：交易所等公开实体（GMGN 标注）；"
+                 f"高频服务钱包（不在钱包库，EVM 送出 ≥ {SERVICE_EVM_SENT:,} 笔，或 SOL 最近 1,000 笔在 {SERVICE_SOL_HOURS} 小时内）；"
+                 f"灰尘转帐（主币约不到 $1、稳定币不到 $1）；共同上游另外要给 ≤ {FUNDER_MAX} 个钱包。")
+
+
+def rel_counts_sql(alias: str) -> str:
+    dust = " OR ".join(f"({alias}.asset='{a}' AND {alias}.amount<{v})" for a, v in RELATION_DUST.items())
+    return (f"{alias}.public_entity=0 AND NOT ({alias}.amount IS NOT NULL AND ({dust})) "
+            f"AND NOT EXISTS (SELECT 1 FROM service_wallets sw WHERE sw.chain={alias}.chain AND sw.address={alias}.src AND sw.service=1)")
+
+
+def service_note(chain: str, sent: Any, span_h: Any) -> str:
+    if chain == "Solana":
+        return f"高频服务钱包（最近 1,000 笔在 {float(span_h or 0):.1f} 小时内）"
+    return f"高频服务钱包（送出 {int(sent or 0):,} 笔）"
+
+
+def relation_noise(conn: sqlite3.Connection, chain: str, src: str, asset: Any, amount: Any, public_entity: Any = False) -> str:
+    if public_entity:
+        return "交易所等公开实体"
+    limit, value = RELATION_DUST.get(str(asset or "")), num(amount)
+    if limit is not None and value is not None and value < limit:
+        return "灰尘转帐"
+    row = conn.execute("SELECT sent, span_h FROM service_wallets WHERE chain=? AND address=? AND service=1", (chain, src)).fetchone()
+    return service_note(chain, row["sent"], row["span_h"]) if row else ""
+
+
+def funder_fanout(conn: sqlite3.Connection, chain: str, src: str) -> int:
+    return conn.execute("SELECT COUNT(DISTINCT dst) FROM relations WHERE chain=? AND src=? AND rel_type='funding'", (chain, src)).fetchone()[0]
+
+
+def _rpc(chain: str, method: str, params: list[Any]) -> Any:
+    import urllib.request
+    last = ""
+    for url in SERVICE_RPC[chain]:
+        try:
+            req = urllib.request.Request(url, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
+                                         headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read())
+            if data.get("error") or data.get("result") is None:
+                last = str(data.get("error") or "没有结果")[:80]
+                continue
+            return data["result"]
+        except Exception as exc:
+            last = str(exc)[:80]
+    raise RuntimeError(f"{chain} 节点查不到：{last}")
+
+
+def check_service(chain: str, address: str) -> tuple[int, int | None, float | None]:
+    if chain == "Solana":
+        sigs = _rpc(chain, "getSignaturesForAddress", [address, {"limit": 1000}]) or []
+        times = [s.get("blockTime") for s in sigs if s.get("blockTime")]
+        span = (max(times) - min(times)) / 3600 if len(times) > 1 else None
+        return (1 if len(sigs) >= 1000 and span is not None and span < SERVICE_SOL_HOURS else 0), len(sigs), span
+    sent = int(_rpc(chain, "eth_getTransactionCount", [address, "latest"]), 16)
+    return (1 if sent >= SERVICE_EVM_SENT else 0), sent, None
+
+
+def classify_funders(limit: int = SERVICE_BATCH) -> dict[str, Any]:
+    now = int(time.time())
+    with LOCK:
+        conn = connect()
+        try:
+            todo = conn.execute(
+                "SELECT r.chain, r.src, COUNT(DISTINCT r.dst) AS n FROM relations r WHERE r.rel_type='funding' AND r.public_entity=0 "
+                "AND NOT EXISTS (SELECT 1 FROM service_wallets sw WHERE sw.chain=r.chain AND sw.address=r.src AND sw.checked_at>?) "
+                "GROUP BY r.chain, r.src HAVING n>=2 ORDER BY n DESC LIMIT ?", (now - SERVICE_RECHECK, limit)).fetchall()
+            inlib = {(r["chain"], r["src"]) for r in todo if _rows_for(conn, r["chain"], r["src"])}
+        finally:
+            conn.close()
+    found: list[tuple[Any, ...]] = []
+    failed = 0
+    for r in todo:
+        chain, src = r["chain"], r["src"]
+        if (chain, src) in inlib:
+            found.append((chain, src, 0, None, None, "钱包库内的钱包", now))
+            continue
+        if chain not in SERVICE_RPC:
+            continue
+        try:
+            service, sent, span = check_service(chain, src)
+        except RuntimeError:
+            failed += 1
+            continue
+        found.append((chain, src, service, sent, span, service_note(chain, sent, span) if service else "", now))
+        time.sleep(0.5 if chain == "Solana" else 0.1)
+    if found:
+        with LOCK:
+            conn = connect()
+            try:
+                conn.executemany("INSERT OR REPLACE INTO service_wallets VALUES (?,?,?,?,?,?,?)", found)
+                _state_put(conn, "funders:last", {"at": now, "checked": len(found), "service": sum(1 for f in found if f[2]), "failed": failed})
+                conn.commit()
+            finally:
+                conn.close()
+    return {"ok": True, "checked": len(found), "service": sum(1 for f in found if f[2]), "failed": failed, "left": max(0, len(todo) - len(found))}
 
 
 def relabel_if_stale() -> int:

@@ -35,10 +35,15 @@ chrome.runtime.onStartup.addListener(() => {
   applyActionBehavior();
 });
 
-chrome.action.onClicked.addListener(async (tab) => {
-  if (tab && tab.id != null) {
-    try { await chrome.tabs.sendMessage(tab.id, { type: "wl-float-toggle" }); return; }
-    catch (_) {  }
+let panelModeNow = "side";
+applyActionBehavior().then((m) => { panelModeNow = m; }).catch(() => {});
+
+const SITE_URL = /^https:\/\/(?:www\.)?(?:gmgn|debot|ave)\.ai\//;
+chrome.action.onClicked.addListener((tab) => {
+  const site = tab && tab.id != null && SITE_URL.test(tab.url || "");
+  if (panelModeNow === "float" && site) {
+    chrome.tabs.sendMessage(tab.id, { type: "wl-float-toggle" }).catch(() => {});
+    return;
   }
   if (tab && tab.windowId != null) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
 });
@@ -47,6 +52,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.panelMode) return;
   applyActionBehavior();
   const mode = changes.panelMode.newValue === "float" ? "float" : "side";
+  panelModeNow = mode;
   chrome.tabs.query({ url: SITE_TABS }).then((tabs) => {
     for (const t of tabs) chrome.tabs.sendMessage(t.id, { type: "wl-float-mode", mode }).catch(() => {});
   }).catch(() => {});
