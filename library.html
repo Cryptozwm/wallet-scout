@@ -103,8 +103,13 @@
       </div>
       <div class="sheet-group">
         <h3>不要导出</h3>
-        <p class="sheet-note">任一个符合就不导出，数字是这一项在这条链挡掉几个。有勾 FOMO 或 pump.fun 用户时，对上的平台用户（有设总盈利门槛就只算达到门槛的）一定导出，不受这里影响。</p>
-        <div class="seg seg-wrap" id="export-drops" role="group" aria-label="不要导出哪些钱包"></div>
+        <p class="sheet-note">任一个符合就不导出，数字是这一项在这条链挡掉几个；有门槛的每排选一个（再按一次＝不挡）。有勾 FOMO 或 pump.fun 用户时，对上的平台用户（有设总盈利门槛就只算达到门槛的）一定导出，不受这里影响。</p>
+        <div class="export-picks" id="export-drops"></div>
+      </div>
+      <div class="sheet-group">
+        <h3>只导出最近进库的</h3>
+        <p class="sheet-note">照进钱包库的时间，平台用户也一样；拿来只补汇这几天新进库的。数字是这条链会导出几个。</p>
+        <div class="seg seg-wrap" id="export-since" role="group" aria-label="只导出最近进库的"></div>
       </div>
       <div class="sheet-group"><h3>链</h3><div class="seg" id="platform-export-chain" role="group" aria-label="链"></div></div>
       <div class="sheet-group">
@@ -190,6 +195,6 @@
   <script src="./shell.js?v=20261111-card"></script>
   <script src="./wallet-investigator.js?v=20261112-libtools"></script>
   <script src="./bookmarklet.js?v=20261112-fboard"></script>
-  <script src="./library-page.js?v=20261112-libtools"></script>
+  <script src="./library-page.js?v=20261113-exportfine"></script>
 </body>
 </html>

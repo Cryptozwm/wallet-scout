@@ -12,14 +12,35 @@ const EXPORT_LABEL_SHORT = [
 ];
 const EXPORT_MAX_LABELS = 4;
 const EXPORT_DROPS = [
-  ["bot", "机器人／高频交易"], ["pending", "还没查交易频率"], ["quiet", "低盈利"], ["highfreq", "高频（30 天买卖次数多）"],
-  ["bundle", "捆绑（同源资金）"], ["insider", "疑似庄家／内部"], ["sniper", "狙击手"], ["loss30", "30 天亏损"], ["dormant", "休眠（7 天没交易）"],
+  ["bot", "机器人／高频交易"], ["pending", "还没查交易频率"], ["bundle", "捆绑（同源资金）"], ["insider", "疑似庄家／内部"], ["sniper", "狙击手"],
 ];
 const EXPORT_DEFAULT_DROPS = ["bot", "pending", "quiet"];
 const EXPORT_GRADES = ["S", "A", "B", "C", "D"];
 const EXPORT_HIGH_FREQ = 1000;
 const EXPORT_CHIP_NAME = { long_pnl: "30天赚", profit_1k: "赚1K+" };
-const EXPORT_PLAT_TIERS = [0, 1000, 10000, 30000, 50000, 100000];
+const EXPORT_PLAT_TIERS = [0, 1, 500, 1000, 2000, 3000, 5000, 10000, 20000, 30000, 50000, 100000, 200000, 500000, 1000000];
+const EXPORT_PLATFORMS = ["FOMO", "pump.fun"];
+const EXPORT_SINCE_DAYS = [0, 1, 3, 7, 14, 30];
+const EXPORT_PNL_LABELS = [["pnl_1m", 1e6], ["pnl_500k", 5e5], ["pnl_200k", 2e5], ["pnl_100k", 1e5], ["pnl_50k", 5e4], ["pnl_30k", 3e4], ["pnl_10k", 1e4], ["pnl_5k", 5e3], ["pnl_3k", 3e3]];
+function exportUsd(value) {
+  const n = Math.abs(Number(value) || 0);
+  return `$${n >= 1e6 ? `${exportOne(n / 1e6)}M` : n >= 1000 ? `${exportOne(n / 1000)}K` : n}`;
+}
+const exportTierText = (t) => (!t ? "不限" : t === 1 ? "有赚" : `≥ ${exportUsd(t)}`);
+
+function exportDropRows(highFreq = EXPORT_HIGH_FREQ) {
+  const trades = [...new Set([300, 500, 1000, 2000, 5000, Number(highFreq) || EXPORT_HIGH_FREQ])].sort((a, b) => a - b);
+  return [
+    { id: "pnl", title: "总体盈利不到", note: "「库门槛」＝钱包库隐藏、清理用的门槛；更高的照盈利分级标签算，没有盈利纪录的也挡",
+      opts: [["quiet", "库门槛"], ...[5e3, 1e4, 3e4, 5e4, 1e5, 2e5, 5e5, 1e6].map((v) => [`pnl:${v}`, exportUsd(v)])] },
+    { id: "real", title: "30 天已实现盈利", note: "GMGN 30 天统计，没有数字的不挡",
+      opts: [["real:-10000", "亏超过 $10K"], ["real:-1000", "亏超过 $1K"], ["loss30", "亏损"], ...[1e3, 3e3, 1e4, 3e4].map((v) => [`real:${v}`, `< ${exportUsd(v)}`])] },
+    { id: "win", title: "30 天胜率低于", note: "没有数字的不挡", opts: [10, 20, 30, 40, 50].map((v) => [`win:${v}`, `${v}%`]) },
+    { id: "trades", title: "30 天买卖笔数", note: "还没到机器人门槛、但买卖很多的",
+      opts: trades.map((v) => [v === Number(highFreq) ? "highfreq" : `trades:${v}`, `≥ ${v.toLocaleString("en-US")}`]) },
+    { id: "idle", title: "多久没交易", note: "照查到的最后一笔交易算到现在，没有纪录的不挡", opts: [3, 7, 14, 30].map((v) => [`idle:${v}`, `${v} 天`]) },
+  ];
+}
 const EXPORT_SKIP = new Set(["gmgn_bundler"]);
 const EXPORT_MAX_BUNDLES = 2;
 const exportClean = (text) => String(text).replace(/[\s\u0000-\u001f]+/g, "_");
@@ -112,23 +133,28 @@ function platformProfitStats(wallets, names, chain, platforms = []) {
     stats.tiers[0] += 1;
     if (!profit) { stats.unknown += 1; continue; }
     if (profit.value < 0) stats.loss += 1;
-    else if (profit.value < EXPORT_PLAT_TIERS[1]) stats.small += 1;
+    else if (profit.value < 1000) stats.small += 1;
     for (const t of EXPORT_PLAT_TIERS) if (t && profit.value >= t) stats.tiers[t] += 1;
   }
   return stats;
 }
 
+function exportPlatMin(value) {
+  const ok = (v) => (EXPORT_PLAT_TIERS.includes(Number(v)) ? Number(v) : 0);
+  return Object.fromEntries(EXPORT_PLATFORMS.map((p) => [p, ok(value && typeof value === "object" ? value[p] : value)]));
+}
 function exportSelection(sel) {
+  const now = Number(sel && sel.now) || Date.now() / 1000;
   if (Array.isArray(sel)) {
     const picks = [];
     if (sel.includes("follow")) picks.push("group:follow");
     if (sel.includes("avoid")) picks.push("avoid");
     if (sel.includes("platform")) picks.push("plat:*");
-    return { picks: new Set(picks), drops: new Set(EXPORT_DEFAULT_DROPS), platMin: 0 };
+    return { picks: new Set(picks), drops: new Set(EXPORT_DEFAULT_DROPS), platMin: exportPlatMin(0), platUnknown: false, since: 0, now };
   }
-  const platMin = Number(sel && sel.platMin);
-  return { picks: new Set((sel && sel.picks) || []), drops: new Set((sel && sel.drops) || []),
-    platMin: EXPORT_PLAT_TIERS.includes(platMin) ? platMin : 0 };
+  const since = Number(sel && sel.since);
+  return { picks: new Set((sel && sel.picks) || []), drops: new Set((sel && sel.drops) || []), platMin: exportPlatMin(sel && sel.platMin),
+    platUnknown: Boolean(sel && sel.platUnknown), since: EXPORT_SINCE_DAYS.includes(since) ? since : 0, now };
 }
 
 function exportDefaultSelection(groupOf = {}) {
@@ -136,19 +162,45 @@ function exportDefaultSelection(groupOf = {}) {
   return { picks: [...follow, "avoid", "plat:FOMO", "plat:pump.fun"], drops: [...EXPORT_DEFAULT_DROPS], platMin: 0 };
 }
 
+const exportExpandDrops = (drops) => [...new Set([...(drops || [])].map((id) => (id === "dormant" ? "idle:7" : id)))];
+
+function exportExpandPicks(picks, groupOf = {}) {
+  const ids = (group) => Object.keys(groupOf).filter((id) => groupOf[id] === group && !EXPORT_SKIP.has(id)).map((id) => `label:${id}`);
+  const out = new Set();
+  for (const pick of picks || []) {
+    const expanded = pick === "avoid" ? ids("avoid") : pick === "group:follow" ? ids("follow") : [];
+    if (expanded.length) expanded.forEach((p) => out.add(p)); else out.add(pick);
+  }
+  return [...out];
+}
+
 function exportPickHit(w, pick, groupOf) {
-  const labels = (w.labels || []).filter((id) => !EXPORT_SKIP.has(id));
-  if (pick.startsWith("grade:")) return Boolean(w.card && w.card.grade === pick.slice(6));
   if (pick.startsWith("label:")) return (w.labels || []).includes(pick.slice(6));
+  if (pick === "grade:none") return !(w.card && w.card.grade);
+  if (pick.startsWith("grade:")) return Boolean(w.card && w.card.grade === pick.slice(6));
+  const labels = (w.labels || []).filter((id) => !EXPORT_SKIP.has(id));
   if (pick === "group:follow") return labels.some((id) => groupOf[id] === "follow");
   if (pick === "avoid") return labels.some((id) => groupOf[id] === "avoid");
   return false;
 }
 
-function exportDropHit(w, drop, highFreq = EXPORT_HIGH_FREQ) {
+function exportPnlTier(labels) {
+  const have = new Set(labels || []);
+  const hit = EXPORT_PNL_LABELS.find(([id]) => have.has(id));
+  return hit ? hit[1] : 0;
+}
+function exportWinrate(card) {
+  const r = card && card.winrate != null ? Number(card.winrate) : NaN;
+  if (!Number.isFinite(r) || (r === 0 && Number(card.realized) > 0)) return null;
+  return r <= 1 ? r * 100 : r;
+}
+
+function exportDropHit(w, drop, highFreq = EXPORT_HIGH_FREQ, now = Date.now() / 1000) {
   const labels = w.labels || [];
   const card = w.card || {};
-  switch (drop) {
+  const [kind, raw] = String(drop).split(":");
+  const v = Number(raw);
+  switch (kind) {
     case "bot": return Boolean(w.bot);
     case "pending": return Boolean(w.botPending) && !w.bot;
     case "quiet": return Boolean(w.quiet);
@@ -158,41 +210,57 @@ function exportDropHit(w, drop, highFreq = EXPORT_HIGH_FREQ) {
     case "sniper": return labels.includes("sniper");
     case "loss30": return card.realized != null && Number(card.realized) < 0;
     case "dormant": return (card.style || []).includes("休眠");
+    case "pnl": return exportPnlTier(labels) < v;
+    case "real": return card.realized != null && Number(card.realized) < v;
+    case "win": { const r = exportWinrate(card); return r != null && r < v; }
+    case "trades": return !w.bot && Number(card.trades) >= v;
+    case "idle": return Boolean(card.lastTs) && (now - Number(card.lastTs)) / 86400 >= v;
     default: return false;
   }
 }
 
-function libraryExportItems(wallets, names, chain, sel, groupOf = {}, labelName = {}, highFreq = EXPORT_HIGH_FREQ) {
-  const { picks, drops, platMin } = exportSelection(sel);
+function libraryExportPick(wallets, names, chain, sel, groupOf = {}, highFreq = EXPORT_HIGH_FREQ) {
+  const { picks, drops, platMin, platUnknown, since, now } = exportSelection(sel);
   const platPicks = [...picks].filter((pick) => pick.startsWith("plat:")).map((pick) => pick.slice(5));
   const otherPicks = [...picks].filter((pick) => !pick.startsWith("plat:"));
+  const dropList = [...drops];
   const plat = new Map();
   for (const p of names || []) {
     if (p.chain !== chain || !p.address || !p.handle) continue;
     if (!plat.has(p.address)) plat.set(p.address, []);
     plat.get(p.address).push(p);
   }
-  const platHit = (rows) => Boolean(rows && platPicks.some((name) => name === "*" || rows.some((p) => p.platform === name)));
-  const profitOk = (w) => {
-    if (!platMin) return true;
+  const picked = (name) => platPicks.includes("*") || platPicks.includes(name);
+  const profitOk = (w, name) => {
+    const min = platMin[name] || 0;
+    if (!min) return true;
     const profit = platformProfit(w);
-    return Boolean(profit) && profit.value >= platMin;
+    return profit ? profit.value >= min : platUnknown;
   };
-  const items = new Map();
+  const viaPlatform = (w, rows) => Boolean(rows) && rows.some((p) => picked(p.platform) && profitOk(w, p.platform));
+  const fresh = (ts) => !since || (Number(ts) > 0 && now - Number(ts) <= since * 86400);
+  const out = new Map();
   for (const w of wallets || []) {
-    if (w.chain !== chain || !w.address || items.has(w.address)) continue;
-    const viaPlatform = platHit(plat.get(w.address)) && profitOk(w);
-    if (!viaPlatform) {
+    if (w.chain !== chain || !w.address || out.has(w.address) || !fresh(w.firstSeen)) continue;
+    const rows = plat.get(w.address);
+    if (!viaPlatform(w, rows)) {
       if (!otherPicks.some((pick) => exportPickHit(w, pick, groupOf))) continue;
-      if ([...drops].some((drop) => exportDropHit(w, drop, highFreq))) continue;
+      if (dropList.some((drop) => exportDropHit(w, drop, highFreq, now))) continue;
     }
-    items.set(w.address, { address: w.address, rename: walletExportRemark(w.labels, w.manualLabels, plat.get(w.address), groupOf, labelName, w) });
+    out.set(w.address, { w, rows });
   }
   const known = new Set((wallets || []).filter((w) => w.chain === chain).map((w) => w.address));
   for (const [address, rows] of plat) {
-    if (!platMin && !items.has(address) && !known.has(address) && platHit(rows)) items.set(address, { address, rename: platformExportRemark(rows) });
+    if (out.has(address) || known.has(address) || !viaPlatform(null, rows)) continue;
+    if (!fresh(Math.min(...rows.map((p) => Number(p.first_seen) || Infinity)))) continue;
+    out.set(address, { w: null, rows });
   }
-  return [...items.values()];
+  return out;
+}
+
+function libraryExportItems(wallets, names, chain, sel, groupOf = {}, labelName = {}, highFreq = EXPORT_HIGH_FREQ) {
+  return [...libraryExportPick(wallets, names, chain, sel, groupOf, highFreq)].map(([address, { w, rows }]) => ({ address,
+    rename: w ? walletExportRemark(w.labels, w.manualLabels, rows, groupOf, labelName, w) : platformExportRemark(rows) }));
 }
 
 function botExportNote(wallets, chain) {
@@ -213,7 +281,7 @@ function libraryExportCounts(wallets, names, sel, groupOf = {}, highFreq = EXPOR
   const chains = new Set([...PLATFORM_EXPORT_CHAINS, ...(wallets || []).map((w) => w.chain), ...(names || []).map((p) => p.chain)].filter(Boolean));
   const counts = new Map();
   for (const chain of chains) {
-    const count = libraryExportItems(wallets, names, chain, sel, groupOf, {}, highFreq).length;
+    const count = libraryExportPick(wallets, names, chain, sel, groupOf, highFreq).size;
     if (count || PLATFORM_EXPORT_CHAINS.includes(chain)) counts.set(chain, count);
   }
   return counts;
@@ -303,6 +371,7 @@ if (typeof module === "object" && module.exports) {
   module.exports = { EXPORT_LABEL_SHORT, EXPORT_SKIP, EXPORT_DROPS, EXPORT_DEFAULT_DROPS, exportMoney, platformExportRemark, strengthExportRemark,
     walletExportRemark, libraryExportItems, libraryExportText, libraryExportCounts, platformExportText, platformExportCounts, botExportNote,
     exportSelection, exportDefaultSelection, exportPickHit, exportDropHit, EXPORT_PLAT_TIERS, platformProfit, platformProfitStats, acctTotal,
+    EXPORT_PLATFORMS, EXPORT_SINCE_DAYS, exportPlatMin, exportExpandPicks, exportExpandDrops, exportDropRows, exportPnlTier, exportWinrate, exportUsd, exportTierText, libraryExportPick,
     pumpSyncProgressText, bulkDuration, gmRefreshEstimate, gmRefreshText, cleanupSummary, cleanupChains, cleanupDetail, cleanupAppliedText, BULK_SRC };
 }
 
@@ -350,6 +419,7 @@ if (typeof document !== "undefined") {
     if (!dialog || !document.getElementById("export-picks")) return;
     const byId = (id) => document.getElementById(id);
     const pickBox = byId("export-picks"), dropSeg = byId("export-drops"), chainSeg = byId("platform-export-chain"), formatSeg = byId("platform-export-format");
+    const sinceSeg = byId("export-since");
     const preview = byId("platform-export-preview"), copyButton = byId("platform-export-copy");
     const status = byId("platform-export-status"), formatNote = byId("platform-export-format-note");
     const FORMAT_NAME = { debot: "DeBot", gmgn: "GMGN" };
@@ -360,8 +430,10 @@ if (typeof document !== "undefined") {
     const SEL_KEY = "wi-export-sel-v2";
     const read = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
     const write = (key, value) => { try { localStorage.setItem(key, value); } catch {  } };
-    const state = { wallets: [], names: [], groupOf: {}, labelName: {}, highFreq: EXPORT_HIGH_FREQ, output: { count: 0, text: "" },
-      picks: null, drops: null, platMin: 0, chain: read("wi-platform-export-chain") || "", format: read("wi-platform-export-format") === "gmgn" ? "gmgn" : "debot" };
+    const zeroMin = () => exportPlatMin(0);
+    const state = { wallets: [], names: [], groupOf: {}, labelName: {}, highFreq: EXPORT_HIGH_FREQ, output: { count: 0, text: "" }, now: Date.now() / 1000,
+      picks: null, drops: null, platMin: zeroMin(), platUnknown: false, since: 0, seen: new Set(),
+      chain: read("wi-platform-export-chain") || "", format: read("wi-platform-export-format") === "gmgn" ? "gmgn" : "debot" };
 
     function loadSelection() {
       let saved = null;
@@ -374,16 +446,23 @@ if (typeof document !== "undefined") {
       return { picks: base.picks.filter((pick) => (pick.startsWith("label:") ? kinds.includes("follow") : pick === "avoid" ? kinds.includes("avoid") : kinds.includes("platform"))),
         drops: base.drops };
     }
-    const saveSelection = () => write(SEL_KEY, JSON.stringify({ picks: [...state.picks], drops: [...state.drops], platMin: state.platMin }));
-    const sel = (picks = state.picks, drops = state.drops) => ({ picks: [...picks], drops: [...drops], platMin: state.platMin });
-    const items = (chain, selection = sel()) => libraryExportItems(state.wallets, state.names, chain, selection, state.groupOf, state.labelName, state.highFreq);
+    const saveSelection = () => write(SEL_KEY, JSON.stringify({ picks: [...state.picks], drops: [...state.drops], platMin: state.platMin,
+      platUnknown: state.platUnknown, since: state.since }));
+    const sel = (over = {}) => ({ picks: [...(over.picks || state.picks)], drops: [...(over.drops || state.drops)], platMin: over.platMin || state.platMin,
+      platUnknown: over.platUnknown ?? state.platUnknown, since: over.since ?? state.since, now: state.now });
+    const count = (over = {}) => libraryExportPick(state.wallets, state.names, state.chain, sel(over), state.groupOf, state.highFreq).size;
+    const items = () => libraryExportItems(state.wallets, state.names, state.chain, sel(), state.groupOf, state.labelName, state.highFreq);
+    const labelIds = (group) => Object.keys(state.groupOf).filter((id) => state.groupOf[id] === group && !EXPORT_SKIP.has(id) && state.seen.has(id));
+    const labelText = (id) => EXPORT_CHIP_NAME[id] || state.labelName[id] || id;
 
     function pickGroups() {
-      const follow = Object.keys(state.groupOf).filter((id) => state.groupOf[id] === "follow");
       return [
-        { title: "实力等级", note: "他自己 30 天赚不赚（不代表跟了会赚）", picks: EXPORT_GRADES.map((g) => [`grade:${g}`, `${g} 级`]) },
-        { title: "高手标签", picks: follow.map((id) => [`label:${id}`, EXPORT_CHIP_NAME[id] || state.labelName[id] || id]) },
-        { title: "其他", picks: [["avoid", "要避开（⚠ 警示用）"], ["plat:FOMO", "FOMO 用户"], ["plat:pump.fun", "pump.fun 用户"], ["label:kol", "KOL"]] },
+        { title: "实力等级", note: "他自己 30 天赚不赚（不代表跟了会赚）",
+          picks: [...EXPORT_GRADES.map((g) => [`grade:${g}`, `${g} 级`]), ["grade:none", "还没评"]] },
+        { title: "高手标签", picks: labelIds("follow").map((id) => [`label:${id}`, labelText(id)]) },
+        { title: "要避开（⚠ 警示用）", note: "汇进去当警示，看到他们买就小心", picks: labelIds("avoid").map((id) => [`label:${id}`, `⚠ ${labelText(id)}`]) },
+        { title: "参考标签", picks: labelIds("ref").filter((id) => !["fomo_user", "pump_user"].includes(id)).map((id) => [`label:${id}`, labelText(id)]) },
+        { title: "平台用户", note: "有设总盈利门槛时，数字是「达到门槛的／全部」", picks: EXPORT_PLATFORMS.map((name) => [`plat:${name}`, `${name} 用户`]) },
       ];
     }
 
@@ -392,79 +471,105 @@ if (typeof document !== "undefined") {
       button.type = "button";
       button.dataset[attr] = key;
       button.setAttribute("aria-pressed", String(on));
-      button.textContent = `${text} ${count}`;
+      button.textContent = count === undefined || count === "" ? text : `${text} ${count}`;
       return button;
     }
 
-    function renderPicks() {
-      pickBox.replaceChildren(...pickGroups().map((group) => {
-        const wrap = document.createElement("div");
-        wrap.className = "export-pick-group";
-        const head = document.createElement("div");
-        head.className = "export-pick-head";
-        const title = document.createElement("span");
-        title.textContent = group.title;
-        const allOn = group.picks.every(([key]) => state.picks.has(key));
-        const toggle = document.createElement("button");
-        toggle.type = "button";
-        toggle.className = "btn btn-sm btn-ghost";
-        toggle.dataset.pickAll = group.picks.map(([key]) => key).join(",");
-        toggle.textContent = allOn ? "全不选" : "全选";
-        head.append(title, toggle);
-        if (group.note) head.append(Object.assign(document.createElement("small"), { className: "muted", textContent: group.note }));
-        const seg = document.createElement("div");
-        seg.className = "seg seg-wrap";
-        seg.setAttribute("role", "group");
-        seg.setAttribute("aria-label", group.title);
-        seg.append(...group.picks.map(([key, text]) => chip(key, "pick", text, state.picks.has(key), items(state.chain, sel([key])).length)));
-        wrap.append(head, seg);
-        return wrap;
-      }), platformTierGroup());
-    }
-
-    function platformTierGroup() {
-      const platforms = [...state.picks].filter((key) => key.startsWith("plat:")).map((key) => key.slice(5));
-      const stats = platformProfitStats(state.wallets, state.names, state.chain, platforms);
+    function groupBox({ title, note = "", chips, allKeys = null, label = title }) {
       const wrap = document.createElement("div");
       wrap.className = "export-pick-group";
       const head = document.createElement("div");
       head.className = "export-pick-head";
-      head.append(Object.assign(document.createElement("span"), { textContent: "FOMO／pump.fun 用户总盈利" }),
-        Object.assign(document.createElement("small"), { className: "muted", textContent: "只导出赚到这么多的平台用户" }));
+      head.append(Object.assign(document.createElement("span"), { textContent: title }));
+      if (allKeys && allKeys.length) {
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "btn btn-sm btn-ghost";
+        toggle.dataset.pickAll = allKeys.join(",");
+        toggle.textContent = allKeys.every((key) => state.picks.has(key)) ? "全不选" : "全选";
+        head.append(toggle);
+      }
+      if (note) head.append(Object.assign(document.createElement("small"), { className: "muted", textContent: note }));
       const seg = document.createElement("div");
       seg.className = "seg seg-wrap";
       seg.setAttribute("role", "group");
-      seg.setAttribute("aria-label", "FOMO／pump.fun 用户总盈利门槛");
-      seg.append(...EXPORT_PLAT_TIERS.map((t) => chip(String(t), "platMin", t ? `≥ $${t / 1000}K` : "不限", state.platMin === t, stats.tiers[t])));
-      const who = !platforms.length || platforms.includes("*") ? "FOMO／pump.fun 用户" : `${platforms.join("＋")} 用户`;
-      const note = document.createElement("p");
-      note.className = "sheet-note";
-      note.textContent = [
-        `${state.chain} 的 ${who} ${stats.total} 个：亏损 ${stats.loss}、赚 $0～$1K ${stats.small}、赚 $1K 以上 ${stats.tiers[1000]}、盈利不明 ${stats.unknown}。`,
-        "总盈利只用平台自己算的、不看 GMGN：pump.fun 用户先用 pump.fun 帐号总盈亏（每颗交易过的币加总），还没算的和 FOMO 用户用钱包库里有平台数字的几颗币加总；都没有的算盈利不明。",
-        state.platMin ? "没达到门槛和盈利不明的平台用户不会因为是平台用户就导出，符合其他勾选的照常导出。" : "",
-        platforms.length ? "" : "现在没勾 FOMO／pump.fun 用户，这排不影响导出。",
-      ].filter(Boolean).join("");
-      wrap.append(head, seg, note);
-      if (stats.pump.total) {
-        const sync = document.createElement("p");
-        sync.className = "sheet-note";
-        sync.append(`${state.chain} 的 pump.fun 用户 ${stats.pump.total} 个，帐号总盈亏已算 ${stats.pump.synced} 个。`,
-          Object.assign(document.createElement("a"), { href: "./pump-sync.html", target: "_blank", rel: "noopener", textContent: "更新 pump.fun 战绩" }));
-        wrap.append(sync);
-      }
+      seg.setAttribute("aria-label", label);
+      seg.append(...chips);
+      wrap.append(head, seg);
       return wrap;
     }
 
+    function platCount(key) {
+      const name = key.slice(5);
+      const reached = count({ picks: [key] });
+      if (!(state.platMin[name] > 0)) return reached;
+      return `${reached}／${count({ picks: [key], platMin: { ...state.platMin, [name]: 0 } })}`;
+    }
+
+    function renderPicks() {
+      pickBox.replaceChildren(...pickGroups().filter((group) => group.picks.length).map((group) => groupBox({ title: group.title, note: group.note,
+        allKeys: group.picks.map(([key]) => key),
+        chips: group.picks.map(([key, text]) => chip(key, "pick", text, state.picks.has(key), key.startsWith("plat:") ? platCount(key) : count({ picks: [key] }))) })),
+      ...platformTierGroups());
+    }
+
+    function platformTierGroups() {
+      const picked = [...state.picks].filter((key) => key.startsWith("plat:")).map((key) => key.slice(5));
+      const boxes = EXPORT_PLATFORMS.map((name) => {
+        const stats = platformProfitStats(state.wallets, state.names, state.chain, [name]);
+        const box = groupBox({ title: `${name} 用户总盈利`, note: "只把赚到这么多的当平台用户导出", label: `${name} 用户总盈利门槛`,
+          chips: EXPORT_PLAT_TIERS.map((t) => chip(`${name}|${t}`, "platMin", exportTierText(t), state.platMin[name] === t, stats.tiers[t])) });
+        const note = document.createElement("p");
+        note.className = "sheet-note";
+        note.textContent = `${state.chain} 的 ${name} 用户 ${stats.total} 个：亏损 ${stats.loss}、赚 $0～$1K ${stats.small}、赚 $1K 以上 ${stats.tiers[1000]}、盈利不明 ${stats.unknown}。`
+          + (picked.includes(name) || picked.includes("*") ? "" : `现在没勾「${name} 用户」，这排不影响导出。`);
+        box.append(note);
+        if (name === "pump.fun" && stats.pump.total) {
+          const sync = document.createElement("p");
+          sync.className = "sheet-note";
+          sync.append(`${state.chain} 的 pump.fun 用户 ${stats.pump.total} 个，帐号总盈亏已算 ${stats.pump.synced} 个。`,
+            Object.assign(document.createElement("a"), { href: "./pump-sync.html", target: "_blank", rel: "noopener", textContent: "更新 pump.fun 战绩" }));
+          box.append(sync);
+        }
+        return box;
+      });
+      const all = platformProfitStats(state.wallets, state.names, state.chain, picked);
+      const unknown = groupBox({ title: "盈利不明的平台用户", note: "有设门槛才有差", label: "盈利不明的平台用户",
+        chips: [chip("0", "platUnknown", "当没达到", !state.platUnknown), chip("1", "platUnknown", "当达到", state.platUnknown, all.unknown)] });
+      const note = document.createElement("p");
+      note.className = "sheet-note";
+      note.textContent = "总盈利只用平台自己算的、不看 GMGN：pump.fun 用户先用 pump.fun 帐号总盈亏（每颗交易过的币加总），还没算的和 FOMO 用户用钱包库里有平台数字的几颗币加总；"
+        + "都没有的算盈利不明（FOMO 不给帐号总盈亏，钱包库里没有他交易过的币就算不出来）。没达到门槛的平台用户不会因为是平台用户就导出，符合其他勾选的照常导出。";
+      unknown.append(note);
+      return [...boxes, unknown];
+    }
+
     function renderDrops() {
-      const now = items(state.chain).length;
-      dropSeg.replaceChildren(...EXPORT_DROPS.map(([key, text]) => {
+      const now = count();
+      const single = EXPORT_DROPS.map(([key, text]) => {
         const on = state.drops.has(key);
         const other = new Set(state.drops);
         if (on) other.delete(key); else other.add(key);
-        const blocked = on ? items(state.chain, sel(state.picks, other)).length - now : now - items(state.chain, sel(state.picks, other)).length;
-        return chip(key, "drop", text, on, blocked);
-      }));
+        const n = count({ drops: [...other] });
+        return chip(key, "drop", text, on, on ? n - now : now - n);
+      });
+      const boxes = [groupBox({ title: "这几种", chips: single, label: "不要导出哪些钱包" })];
+      for (const row of exportDropRows(state.highFreq)) {
+        const ids = row.opts.map(([id]) => id);
+        const base = [...state.drops].filter((id) => !ids.includes(id));
+        const free = count({ drops: base });
+        const current = ids.find((id) => state.drops.has(id)) || "";
+        const box = groupBox({ title: row.title, note: row.note, label: row.title,
+          chips: [["", "不挡"], ...row.opts].map(([id, text]) => chip(id || "-", "dropOpt", text, current === id, id ? free - count({ drops: [...base, id] }) : undefined)) });
+        box.querySelector(".seg").dataset.dropRow = row.id;
+        boxes.push(box);
+      }
+      dropSeg.replaceChildren(...boxes);
+    }
+
+    function renderSince() {
+      if (!sinceSeg) return;
+      sinceSeg.replaceChildren(...EXPORT_SINCE_DAYS.map((d) => chip(String(d), "since", d ? `${d} 天内` : "不限", state.since === d, count({ since: d }))));
     }
 
     function renderChains() {
@@ -486,10 +591,11 @@ if (typeof document !== "undefined") {
       renderChains();
       renderPicks();
       renderDrops();
+      renderSince();
       press(chainSeg, "chain", (chain) => chain === state.chain);
       press(formatSeg, "format", (format) => format === state.format);
       formatNote.textContent = FORMAT_NOTE[state.format];
-      state.output = libraryExportText(items(state.chain), state.format);
+      state.output = libraryExportText(items(), state.format);
       preview.value = state.output.text;
       copyButton.disabled = !state.output.count;
       copyButton.textContent = state.output.count ? `拷贝 ${state.output.count} 个` : "拷贝";
@@ -518,11 +624,16 @@ if (typeof document !== "undefined") {
       state.wallets = data.wallets || [];
       state.names = data.platformNames || [];
       state.highFreq = Number(data.highFreq) || EXPORT_HIGH_FREQ;
+      state.now = Date.now() / 1000;
+      state.seen = new Set(state.wallets.flatMap((w) => w.labels || []));
       if (!state.picks) {
         const saved = loadSelection();
-        state.picks = new Set(saved.picks);
-        state.drops = new Set(saved.drops);
-        state.platMin = exportSelection(saved).platMin;
+        const norm = exportSelection(saved);
+        state.picks = new Set(exportExpandPicks(saved.picks, state.groupOf));
+        state.drops = new Set(exportExpandDrops(saved.drops));
+        state.platMin = norm.platMin;
+        state.platUnknown = norm.platUnknown;
+        state.since = norm.since;
       }
       render();
     }
@@ -534,6 +645,7 @@ if (typeof document !== "undefined") {
       const all = event.target.closest("button[data-pick-all]");
       const button = event.target.closest("button[data-pick]");
       const tier = event.target.closest("button[data-plat-min]");
+      const unknown = event.target.closest("button[data-plat-unknown]");
       if (all) {
         const keys = all.dataset.pickAll.split(",");
         const on = !keys.every((key) => state.picks.has(key));
@@ -542,24 +654,46 @@ if (typeof document !== "undefined") {
         const key = button.dataset.pick;
         if (state.picks.has(key)) state.picks.delete(key); else state.picks.add(key);
       } else if (tier) {
-        state.platMin = Number(tier.dataset.platMin) || 0;
+        const [name, t] = tier.dataset.platMin.split("|");
+        state.platMin = { ...state.platMin, [name]: Number(t) || 0 };
+      } else if (unknown) {
+        state.platUnknown = unknown.dataset.platUnknown === "1";
       } else return;
       saveSelection();
       render();
     });
     dropSeg.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-drop]");
+      const opt = event.target.closest("button[data-drop-opt]");
+      if (button) {
+        const key = button.dataset.drop;
+        if (state.drops.has(key)) state.drops.delete(key); else state.drops.add(key);
+      } else if (opt) {
+        const rowId = opt.closest("[data-drop-row]")?.dataset.dropRow;
+        const row = exportDropRows(state.highFreq).find((r) => r.id === rowId);
+        if (!row) return;
+        const id = opt.dataset.dropOpt;
+        const wasOn = state.drops.has(id);
+        row.opts.forEach(([key]) => state.drops.delete(key));
+        if (id !== "-" && !wasOn) state.drops.add(id);
+      } else return;
+      saveSelection();
+      render();
+    });
+    sinceSeg?.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-since]");
       if (!button) return;
-      const key = button.dataset.drop;
-      if (state.drops.has(key)) state.drops.delete(key); else state.drops.add(key);
+      state.since = Number(button.dataset.since) || 0;
       saveSelection();
       render();
     });
     byId("export-reset")?.addEventListener("click", () => {
       const base = exportDefaultSelection(state.groupOf);
-      state.picks = new Set(base.picks);
+      state.picks = new Set(exportExpandPicks(base.picks, state.groupOf));
       state.drops = new Set(base.drops);
-      state.platMin = 0;
+      state.platMin = zeroMin();
+      state.platUnknown = false;
+      state.since = 0;
       saveSelection();
       render();
     });
