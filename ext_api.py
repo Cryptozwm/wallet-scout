@@ -13,7 +13,8 @@ import wallet_library as wl
 from oss_config import DATA_DIR
 
 VERSION = "1"
-PATHS = {"/api/ext/token", "/api/ext/lookup", "/api/ext/signals", "/api/ext/tag", "/api/ext/star", "/api/ext/names"}
+PATHS = {"/api/ext/token", "/api/ext/lookup", "/api/ext/signals", "/api/ext/tag", "/api/ext/star", "/api/ext/names",
+         "/api/ext/pump-hot", "/api/ext/pump-hot-want"}
 HOLDERS_TTL = 300
 HOLDERS_FAIL_TTL = 30
 HOLDERS_MIN_REFRESH = 60
@@ -338,7 +339,7 @@ NAMES_LOG = DATA_DIR / "logs" / "ext-site-names.jsonl"
 _EXPORT_SHORT = {"内部", "同源", "捆绑", "狙击", "机器人", "金狗常客", "新钱包金狗", "卖在高点", "钻石手", "金狗卖飞",
                  "聪明钱", "GMGN聪明钱", "30天赚", "早期高盈利", "长抱大赚", "赚1K+"}
 _EXPORT_BITS = ("最赚", "胜率", "平台盈亏", "GMGN总", "GMGN已实现", "pump总", "赚1K+", "捆")
-_EXPORT_RE = re.compile(r"^(?:[SABCD]级|⚠|FOMO:|pump:)|^\d+天")
+_EXPORT_RE = re.compile(r"^(?:[SABCD]级|⚠|FOMO:|pump:)|^\d+天|^[赚赚]\$?\d+(?:\.\d+)?[KkMm]\+$")
 _GENERIC = {"dev", "creator", "sniper", "insider", "bot", "kol", "whale", "smartmoney", "smart", "freshwallet", "fresh",
             "bundler", "bundle", "ratrader", "top", "holder", "trader", "unknown", "you", "me", "new",
             "聪明钱", "聪明钱", "狙击", "狙击", "狙击手", "狙击手", "内幕", "内幕", "老鼠仓", "老鼠仓", "巨鲸", "巨鲸", "鲸鱼", "鲸鱼",
@@ -644,7 +645,9 @@ def star(payload: dict[str, Any]) -> dict[str, Any]:
 def ping() -> dict[str, Any]:
     with _lock:
         names_stats = json.loads(json.dumps(_names_stats))
-    return {"ok": True, "service": "wallet-ext", "version": VERSION, "now": int(time.time()), "names": names_stats}
+    import smart_money
+    return {"ok": True, "service": "wallet-ext", "version": VERSION, "now": int(time.time()), "names": names_stats,
+            "pumpHot": smart_money.pump_feed_status()}
 
 
 def handle(path: str, payload: dict[str, Any], fetch_holders: Callable[[str, str], Any] | None = None) -> dict[str, Any]:
@@ -660,4 +663,7 @@ def handle(path: str, payload: dict[str, Any], fetch_holders: Callable[[str, str
         return star(payload)
     if path == "/api/ext/names":
         return names(payload)
+    if path in ("/api/ext/pump-hot", "/api/ext/pump-hot-want"):
+        import smart_money
+        return smart_money.pump_feed_put(payload) if path == "/api/ext/pump-hot" else smart_money.pump_feed_want(payload)
     raise ValueError("找不到此 API")

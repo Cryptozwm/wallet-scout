@@ -5,9 +5,10 @@ const PLATFORM_EXPORT_CHAINS = ["BSC", "Solana", "Robinhood"];
 const EXPORT_KINDS = ["follow", "avoid", "platform"];
 const EXPORT_LABEL_SHORT = [
   ["insider", "⚠内部"], ["bundle_member", "⚠同源"], ["gmgn_bundler", "⚠捆绑"], ["sniper", "⚠狙击"], ["bot", "⚠机器人"],
+  ["pnl_1m", "赚1M+"], ["pnl_500k", "赚500K+"], ["pnl_200k", "赚200K+"], ["pnl_100k", "赚100K+"], ["pnl_50k", "赚50K+"], ["pnl_30k", "赚30K+"], ["pnl_10k", "赚10K+"], ["pnl_5k", "赚5K+"], ["pnl_3k", "赚3K+"],
   ["gold_regular", "金狗常客"], ["fresh_gold", "新钱包金狗"], ["top_seller", "卖在高点"], ["diamond", "钻石手"], ["paper_gold", "金狗卖飞"],
   ["smart_money", "聪明钱"], ["gmgn_smart", "GMGN聪明钱"], ["long_pnl", "30天赚"], ["early_profit", "早期高盈利"],
-  ["long_hold_big", "长抱大赚"], ["profit_1k", "赚1K+"],
+  ["long_hold_big", "长抱大赚"],
 ];
 const EXPORT_MAX_LABELS = 4;
 const EXPORT_DROPS = [

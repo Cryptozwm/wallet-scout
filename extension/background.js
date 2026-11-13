@@ -260,6 +260,66 @@ async function pumpGrab(msg) {
   }
 }
 
+const PUMP_HOT_ALARM = "wl-pump-hot";
+function ensurePumpAlarm() {
+  chrome.alarms.get(PUMP_HOT_ALARM).then((a) => { if (!a) chrome.alarms.create(PUMP_HOT_ALARM, { periodInMinutes: 0.5 }); }).catch(() => {});
+}
+ensurePumpAlarm();
+chrome.runtime.onInstalled.addListener(ensurePumpAlarm);
+chrome.runtime.onStartup.addListener(ensurePumpAlarm);
+async function pumpHotInPage(chains, query) {
+  const keys = ["m", "t", "i", "age", "ath", "pl", "lp"];
+  const boards = {};
+  for (const chain of chains) {
+    let status = 0, text = "";
+    try {
+      const r = await fetch(`/api/indexer/boards/trending?${new URLSearchParams({ ...query, chains: chain })}`, { headers: { Accept: "application/json" } });
+      status = r.status; text = await r.text();
+    } catch (_) { status = 0; }
+    if (status === 403) return { ok: false, challenge: true };
+    if (status < 200 || status >= 300) return { ok: false, error: status ? `pump.fun 回 HTTP ${status}` : "连不上 pump.fun" };
+    let j = null;
+    try { j = JSON.parse(text); } catch (_) { return { ok: false, challenge: true }; }
+    const entries = Array.isArray(j && j.entries) ? j.entries.filter((e) => e && typeof e === "object").slice(0, 200) : [];
+    boards[chain] = { serverTs: j && j.serverTs, entries: entries.map((e) => Object.fromEntries(keys.map((k) => [k, e[k] == null ? null : e[k]]))) };
+  }
+  return { ok: true, boards };
+}
+let pumpHotBusy = false;
+async function pumpHotTick() {
+  if (pumpHotBusy) return;
+  let want;
+  try { want = await post("/api/ext/pump-hot-want", {}); } catch (_) { return; }
+  if (!want || !want.want) return;
+  pumpHotBusy = true;
+  let tab = null, opened = false;
+  try {
+    const tabs = await chrome.tabs.query({ url: PUMP_TABS }).catch(() => []);
+    tab = tabs.find((t) => t.status === "complete") || null;
+    if (!tab) { tab = await chrome.tabs.create({ url: "https://pump.fun/", active: false }); opened = true; }
+    await waitTabLoaded(tab.id);
+    if (opened) await new Promise((r) => setTimeout(r, 1500));
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: pumpHotInPage, args: [want.chains || [], want.query || {}] });
+    const r = res && res.result;
+    if (!r || !r.ok) {
+      if (r && r.challenge) {
+        opened = false;
+        await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+        await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      }
+      await post("/api/ext/pump-hot", { error: r && r.challenge ? "pump.fun 要先过人机验证：已在 Chrome 切到 pump.fun 页，验证完再挖一次" : (r && r.error) || "pump.fun 页没回应" }).catch(() => {});
+      return;
+    }
+    for (const [chain, b] of Object.entries(r.boards)) await post("/api/ext/pump-hot", { chain, serverTs: b.serverTs, entries: b.entries });
+  } catch (err) {
+    await post("/api/ext/pump-hot", { error: String((err && err.message) || err).slice(0, 150) }).catch(() => {});
+  } finally {
+    if (opened && tab) chrome.tabs.remove(tab.id).catch(() => {});
+    pumpHotBusy = false;
+  }
+}
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === PUMP_HOT_ALARM) pumpHotTick(); });
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   const run = async () => {
     switch (msg && msg.type) {

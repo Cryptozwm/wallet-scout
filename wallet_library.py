@@ -21,6 +21,18 @@ LONG_PNL_USD = cfg('LONG_PNL_USD', 10000)
 EARLY_PROFIT_SECONDS = cfg('EARLY_PROFIT_SECONDS', 900)
 EARLY_PROFIT_USD = cfg('EARLY_PROFIT_USD', 8000)
 EARLY_PROFIT_ROI = cfg('EARLY_PROFIT_ROI', 300)
+PNL_TIERS = (3000, 5000, 10000, 30000, 50000, 100000, 200000, 500000, 1000000)
+
+
+def tier_money(value: int) -> str:
+    return f"${value // 1_000_000}M" if value >= 1_000_000 else f"${value // 1000}K"
+
+
+def tier_id(value: int) -> str:
+    return "pnl_" + tier_money(value)[1:].lower()
+
+
+TIER_IDS = {tier_id(v) for v in PNL_TIERS}
 QUIET_PNL_USD = cfg('QUIET_PNL_USD', 2000)
 QUIET_TEXT = f"${QUIET_PNL_USD // 1000}K"
 EARLY_SECONDS = cfg('EARLY_SECONDS', 3600)
@@ -68,7 +80,9 @@ RULES: list[dict[str, str]] = [
     {"id": "long_pnl", "group": "follow", "label": "长期获利", "rule": f"GMGN 30 天已实现盈利 ≥ ${LONG_PNL_USD:,}（快到清理日、不到 {QUIET_TEXT} 的钱包会自动补查）"},
     {"id": "early_profit", "group": "follow", "label": "早期高盈利", "rule": f"开盘后 {EARLY_PROFIT_SECONDS // 60} 分钟内进场，且该 CA 总盈利 ≥ ${EARLY_PROFIT_USD:,} 或 ROI ≥ {EARLY_PROFIT_ROI}%"},
     {"id": "long_hold_big", "group": "follow", "label": "长抱大赚", "rule": "持有 ≥ 24 小时，且该 CA 总盈利 ≥ $10,000"},
-    {"id": "profit_1k", "group": "follow", "label": "有赚 $1K+", "rule": f"该 CA 总盈亏（已实现＋未实现）≥ ${PROFIT_USD:,}"},
+    *[{"id": tier_id(v), "group": "follow", "label": f"赚{tier_money(v)}+",
+       "rule": f"总体盈利 ≥ {tier_money(v)}（跟清理用同一个数字：库里每颗币盈亏加总、GMGN 30 天已实现、GMGN 历史总盈利、平台战绩取最高，"
+               f"BSC、RH 合起来或任一条链单独都算；pump.fun 用户算过帐号总盈亏的以它为准）。只标最高一级"} for v in reversed(PNL_TIERS)],
     {"id": "insider", "group": "avoid", "label": "疑似庄家/内部", "rule": "GMGN 该币标签含 creator / dev_team / insider / rat_trader，或开盘后 60 秒内进场且持仓 ≥ 5%"},
     {"id": "bundle_member", "group": "avoid", "label": "捆绑成员（同源资金）", "rule": "在某 CA 中，与至少 1 个其他早期地址由同一个非交易所地址提供主币／USD 稳定币"},
     {"id": "sniper", "group": "avoid", "label": "狙击手", "rule": "GMGN 标 sniper（开池后最早几个区块买入；还没卖就是卖压）"},
@@ -85,7 +99,7 @@ RULE_LABELS = {rule["id"]: rule["label"] for rule in RULES}
 LABEL_GROUP = {rule["id"]: rule["group"] for rule in RULES}
 FLAGGED = {"insider", "bundle_member", "early_profit", "smart_money", "long_hold_big", "long_pnl", "fresh_gold", "paper_gold",
            "gold_regular", "top_seller", "diamond"}
-HIDDEN_LABELS = {"gmgn_bundler"}
+HIDDEN_LABELS = {"gmgn_bundler", "profit_1k"}
 TAG_LABELS = {"smart_degen": "gmgn_smart", "sniper": "sniper", "kol": "kol", "renowned": "kol",
               "whale": "whale", "top_holder": "top_holder", "bluechip_owner": "bluechip", "transfer_in": "transfer_in",
               **{tag: "insider" for tag in INSIDER_TAGS}}
@@ -116,8 +130,8 @@ LABELS_VERSION = "1"
 KEEP_LABELS = {"insider", "bundle_member", "sniper", "fomo_user", "pump_user", "gold_regular", "fresh_gold", "top_seller", "diamond", "paper_gold"}
 KEEP_GMGN_TAGS = {"sniper", *INSIDER_TAGS}
 QUIET_RULE = (f"总体盈利不到 ${QUIET_PNL_USD:,} 就不留：库里每颗币的盈亏加总、FOMO／pump.fun 平台战绩、GMGN 30 天已实现盈利、GMGN 历史总盈利（按「更新盈亏」查过的），四个都不到 ${QUIET_PNL_USD:,}"
-              f"（同一个 0x 地址在 BSC、Robinhood 合起来算）。"
-              f"例外照样留：你标过的（手动标签、移除过的标签、备注、私人标签、确认相关）、聪明钱追踪中、"
+              f"（同一个 0x 地址在 BSC、Robinhood 合起来算；任一条链单独达标也算，另一条链的亏损不会拖累）。"
+              f"例外照样留：你标过的（手动标签、移除过的标签、备注、私人标签、确认相关）、聪明钱追踪中、有名字的（KOL／推特／网站名字）、"
               f"要避开的（疑似庄家/内部、捆绑成员、狙击手）、FOMO／pump.fun 用户、早买金狗那几条。"
               f"这种钱包预设隐藏；进库满 {PRUNE_AFTER_DAYS} 天、查过 GMGN 30 天统计还是不到 ${QUIET_PNL_USD:,}，"
               f"每天 {PRUNE_HOUR:02d}:00 后先封存再删，可以还原。资金关联纪录另外存着，不会跟着删。")
@@ -283,8 +297,6 @@ def appearance_flags(app: sqlite3.Row | dict[str, Any]) -> set[str]:
         flags.add("early_profit")
     if hold is not None and hold >= 86400 and (total or 0) >= 10000:
         flags.add("long_hold_big")
-    if (total or 0) >= PROFIT_USD:
-        flags.add("profit_1k")
     flags |= {TAG_LABELS[tag] for tag in tags if tag in TAG_LABELS}
     if elapsed is not None and 0 <= elapsed <= 60 and (pct or 0) >= 5:
         flags.add("insider")
@@ -672,7 +684,7 @@ def refresh_follow_records(now: float | None = None, force: bool = False) -> dic
             "seconds": round(time.time() - started, 1)}
 
 
-def recompute_labels(conn: sqlite3.Connection, chain: str, address: str) -> list[str]:
+def recompute_labels(conn: sqlite3.Connection, chain: str, address: str, sibling: bool = True) -> list[str]:
     apps = conn.execute("SELECT * FROM appearances WHERE chain=? AND address=?", (chain, address)).fetchall()
     row = conn.execute("SELECT twitter, gmgn_tags, created_at, pnl30_realized, pf_buys, pnl30_buys, pnl30_sells, pnl30_tokens FROM wallets "
                        "WHERE chain=? AND address=?", (chain, address)).fetchone()
@@ -706,8 +718,16 @@ def recompute_labels(conn: sqlite3.Connection, chain: str, address: str) -> list
         labels.add("bot")
     for platform in platforms:
         labels.add(PLATFORM_LABEL.get(platform, ""))
+    best, _src = wallet_best(conn, chain, address)
+    tier = next((v for v in reversed(PNL_TIERS) if best is not None and best >= v), None)
+    if tier:
+        labels.add(tier_id(tier))
     ordered = [rule["id"] for rule in RULES if rule["id"] in labels]
     conn.execute("UPDATE wallets SET auto_labels=? WHERE chain=? AND address=?", (json.dumps(ordered), chain, address))
+    if sibling and chain in EVM_CHAINS:
+        for other in EVM_CHAINS:
+            if other != chain and conn.execute("SELECT 1 FROM wallets WHERE chain=? AND address=?", (other, address)).fetchone():
+                recompute_labels(conn, other, address, sibling=False)
     return ordered
 
 
@@ -1413,7 +1433,8 @@ def platform_ingest(result: dict[str, Any]) -> dict[str, Any]:
             "skipped": len(result.get("rows") or []) - len(rows), "libraryWallets": total}
 
 
-KEEP_REASON = {"mark": "你标过的", "sm": "聪明钱追踪中", "avoid": "要避开的", "gold": "早买金狗那几条", "platform": "FOMO／pump.fun 用户"}
+KEEP_REASON = {"mark": "你标过的", "sm": "聪明钱追踪中", "named": "有名字的", "avoid": "要避开的", "gold": "早买金狗那几条",
+               "platform": "FOMO／pump.fun 用户"}
 KEEP_LABEL_REASON = {"insider": "avoid", "bundle_member": "avoid", "sniper": "avoid", "fomo_user": "platform", "pump_user": "platform",
                      "gold_regular": "gold", "fresh_gold": "gold", "top_seller": "gold", "diamond": "gold", "paper_gold": "gold"}
 assert set(KEEP_LABEL_REASON) == KEEP_LABELS
@@ -1431,13 +1452,20 @@ def wallet_groups(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
             return
         g[field] = value if g[field] is None else (g[field] + value if how == "sum" else max(g[field], value))
 
-    for r in conn.execute("SELECT chain, address, first_seen, auto_labels, manual_labels, removed_labels, note, gmgn_tags, pnl30_realized, pf_total, gm_total FROM wallets"):
+    for r in conn.execute("SELECT chain, address, first_seen, auto_labels, manual_labels, removed_labels, note, gmgn_tags, pnl30_realized, pf_total, gm_total, "
+                          "name, twitter FROM wallets"):
         group = norm(r["chain"], r["address"])
-        g = groups.setdefault(group, {"members": [], "keep": set(), "coin": None, "pnl30": None, "pf": None, "gm": None, "acct": None})
+        g = groups.setdefault(group, {"members": [], "keep": set(), "coin": None, "pnl30": None, "pf": None, "gm": None, "acct": None,
+                                      "coin1": None, "pnl30_1": None, "gm1": None})
         g["members"].append((r["chain"], r["address"], r["first_seen"]))
         add(group, "pnl30", num(r["pnl30_realized"]))
+        add(group, "pnl30_1", num(r["pnl30_realized"]), "max")
         add(group, "pf", num(r["pf_total"]), "max")
         add(group, "gm", num(r["gm_total"]))
+        gm_one = num(r["gm_total"])
+        add(group, "gm1", gm_one if gm_one is not None and abs(gm_one) < 1e9 else None, "max")
+        if str(r["name"] or "").strip() or str(r["twitter"] or "").strip():
+            g["keep"].add("named")
         if loads(r["manual_labels"]) or loads(r["removed_labels"]) or str(r["note"] or "").strip():
             g["keep"].add("mark")
         g["keep"] |= {KEEP_LABEL_REASON[x] for x in set(loads(r["auto_labels"])) & KEEP_LABELS}
@@ -1447,6 +1475,7 @@ def wallet_groups(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
         g = groups.get(norm(r[0], r[1]))
         if g is not None:
             g["coin"] = (g["coin"] or 0.0) + (num(r[2]) or 0.0)
+            add(norm(r[0], r[1]), "coin1", num(r[2]) or 0.0, "max")
     for r in conn.execute("SELECT chain, address, total FROM plat_accounts WHERE at IS NOT NULL AND total IS NOT NULL"):
         add(norm(r[0], r[1]), "acct", num(r[2]), "max")
 
@@ -1468,7 +1497,8 @@ def wallet_groups(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
 def quiet_wallets(conn: sqlite3.Connection) -> dict[tuple[str, str], int | None]:
     out: dict[tuple[str, str], int | None] = {}
     for g in wallet_groups(conn).values():
-        if g["coin"] is None or g["keep"] or max(g["coin"], g["pnl30"] or 0.0, g["pf"] or 0.0, g["gm"] or 0.0) >= QUIET_PNL_USD:
+        if g["coin"] is None or g["keep"] or max(g["coin"], g["pnl30"] or 0.0, g["pf"] or 0.0, g["gm"] or 0.0,
+                                                 g["coin1"] or 0.0, g["pnl30_1"] or 0.0, g["gm1"] or 0.0) >= QUIET_PNL_USD:
             continue
         seen = [first_seen for _, _, first_seen in g["members"]]
         start = None if None in seen else max(QUIET_SINCE, *seen)
@@ -1478,13 +1508,41 @@ def quiet_wallets(conn: sqlite3.Connection) -> dict[tuple[str, str], int | None]
 
 
 CLEANUP_SCOPES = {"": "全部", "Solana": "Solana", "EVM": "BSC／Robinhood"}
-CLEANUP_KEEP_ORDER = ("mark", "sm", "avoid", "gold", "platform")
+CLEANUP_KEEP_ORDER = ("mark", "sm", "named", "avoid", "gold", "platform")
+
+
+def wallet_best(conn: sqlite3.Connection, chain: str, address: str) -> tuple[float | None, str]:
+    chains = same_wallet_chains(chain)
+    marks = ",".join("?" * len(chains))
+    g: dict[str, Any] = {"coin": None, "pnl30": None, "pf": None, "gm": None, "acct": None, "coin1": None, "pnl30_1": None, "gm1": None}
+
+    def add(field: str, value: float | None, how: str = "sum") -> None:
+        if value is not None:
+            g[field] = value if g[field] is None else (g[field] + value if how == "sum" else max(g[field], value))
+
+    for r in conn.execute(f"SELECT pnl30_realized, pf_total, gm_total FROM wallets WHERE chain IN ({marks}) AND address=?", (*chains, address)):
+        add("pnl30", num(r[0]))
+        add("pnl30_1", num(r[0]), "max")
+        add("pf", num(r[1]), "max")
+        add("gm", num(r[2]))
+        gm_one = num(r[2])
+        add("gm1", gm_one if gm_one is not None and abs(gm_one) < 1e9 else None, "max")
+    for r in conn.execute(f"SELECT SUM({EFFECTIVE_TOTAL_SQL}) FROM appearances a WHERE a.chain IN ({marks}) AND a.address=? GROUP BY a.chain",
+                          (*chains, address)):
+        g["coin"] = (g["coin"] or 0.0) + (num(r[0]) or 0.0)
+        add("coin1", num(r[0]) or 0.0, "max")
+    for r in conn.execute(f"SELECT total FROM plat_accounts WHERE chain IN ({marks}) AND address=? AND at IS NOT NULL AND total IS NOT NULL",
+                          (*chains, address)):
+        add("acct", num(r[0]), "max")
+    return group_best(g)
 
 
 def group_best(g: dict[str, Any]) -> tuple[float | None, str]:
     if g.get("acct") is not None:
         return g["acct"], "acct"
-    vals = [(g[k], k) for k in ("coin", "pnl30", "gm", "pf") if g.get(k) is not None]
+    one = {"coin": "coin1", "pnl30": "pnl30_1", "gm": "gm1"}
+    vals = [(max(v for v in (g.get(k), g.get(one.get(k, ""))) if v is not None), k) for k in ("coin", "pnl30", "gm", "pf")
+            if g.get(k) is not None or g.get(one.get(k, "")) is not None]
     if not vals:
         return None, ""
     return max(vals)
@@ -1525,7 +1583,7 @@ def cleanup_candidates(conn: sqlite3.Connection, threshold: float, platform: boo
 def cleanup_rule(threshold: float, platform: bool, scope: str, young: bool) -> str:
     return (f"手动清理：总体盈利（库里每颗币的盈亏加总、GMGN 30 天已实现、GMGN 历史总盈利、平台战绩，有数据的取最高；pump.fun 用户算过帐号总盈亏的以它为准）不到 ${threshold:,.0f}；"
             f"链：{CLEANUP_SCOPES.get(scope, scope)}；{'平台用户也一起看' if platform else '平台用户不删'}；{f'进库不满 {PRUNE_AFTER_DAYS} 天的也删' if young else f'进库不满 {PRUNE_AFTER_DAYS} 天的不删'}；"
-            "你标过的、聪明钱追踪中、要避开的、早买金狗那几条照样不删")
+            "你标过的、聪明钱追踪中、有名字的、要避开的、早买金狗那几条照样不删；BSC、RH 任一条链单独达标也不删")
 
 
 def cleanup_apply(groups: set[str] | list[str], threshold: float, platform: bool = False, scope: str = "", young: bool = True,
@@ -1594,6 +1652,8 @@ def save_gm(chain: str, addresses: list[str], rows: list[dict[str, Any]], now: i
                 buys, sells = num(p.get("buy")), num(p.get("sell"))
                 conn.execute("UPDATE wallets SET gm_total=?, gm_realized=?, gm_buys=?, gm_sells=?, gm_at=?, gm_note='' WHERE chain=? AND address=?",
                              (total, realized, int(buys) if buys is not None else None, int(sells) if sells is not None else None, now, chain, address))
+                if conn.execute("SELECT 1 FROM wallets WHERE chain=? AND address=?", (chain, address)).fetchone():
+                    recompute_labels(conn, chain, address)
                 out["updated"] += 1
             conn.commit()
         finally:

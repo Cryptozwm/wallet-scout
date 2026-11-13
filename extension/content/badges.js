@@ -16,12 +16,15 @@
   const ME = `card-${Math.random().toString(36).slice(2)}`;
 
   const send = window.__wlSend || ((msg) => new Promise((resolve) => {
+    const late = setTimeout(() => resolve({ ok: false, error: "插件背景 15 秒没回应" }), 15000);
     try {
       chrome.runtime.sendMessage(msg, (reply) => {
+        clearTimeout(late);
         void chrome.runtime.lastError;
         resolve(reply || { ok: false, error: "插件背景没回应" });
       });
     } catch (err) {
+      clearTimeout(late);
       resolve({ ok: false, error: String(err) });
     }
   }));
@@ -199,7 +202,7 @@
     if (w.private && w.private.own) chips.push({ cls: "pv", text: "我的" });
     const labels = (w.labels || [])
       .filter((l) => !HIDE_IN_BADGE.has(l.id) && !(plat && (l.id === "fomo_user" || l.id === "pump_user")) && !(w.avoid && l.id === "bot") && !(ni.src === "label" && l.id === ni.id))
-      .sort((a, b) => (GROUP_ORDER[a.group] ?? 9) - (GROUP_ORDER[b.group] ?? 9));
+      .sort((a, b) => (GROUP_ORDER[a.group] ?? 9) - (GROUP_ORDER[b.group] ?? 9) || (/^pnl_/.test(a.id) ? 0 : 1) - (/^pnl_/.test(b.id) ? 0 : 1));
     labels.slice(0, 2).forEach((l) => chips.push({ cls: l.group === "avoid" ? "av" : l.group === "follow" ? "fo" : "rf", text: short(l.text, 7) }));
     if (labels.length > 2) chips.push({ cls: "more", text: `+${labels.length - 2}` });
     if (!w.lib && w.trade && !(w.sm && w.sm.watch)) chips.push({ cls: "rf", text: `聪明钱买 ${usd(w.trade.buy, false)}` });
@@ -216,7 +219,7 @@
     const all = badgeChips(w);
     const other = Boolean(g || all.length || (w.here && w.here.total != null));
     let name = inline && (g || all.length) ? "" : badgeName(w) || (other ? "" : "钱包库");
-    if (other && sameAsSite(name, site)) name = "";
+    if (inline && other && sameAsSite(name, site)) name = "";
     const here = w.here && w.here.total != null ? `<span class="pn ${w.here.total >= 0 ? "up" : "dn"}">${usd(w.here.total)}</span>` : "";
     const star = w.sm && w.sm.watch ? `<span class="st">★</span>` : "";
     const list = inline && all.length > 1 ? [all[0], { cls: "more", text: `+${all.length - 1}` }] : all;
@@ -401,7 +404,7 @@
     const use = (w.useText || []).map((u, i) => `<span class="c use ${w.use[i] === "avoid" ? "av" : w.use[i] === "confirm" ? "fo" : ""}">${esc(u)}</span>`).join("");
     return `<div class="card" role="dialog" aria-label="钱包明细">
       <div class="hd"><span class="g ${w.grade ? `g-${esc(w.grade)}` : "g-none"}">${esc(w.grade || "–")}</span>
-        <span class="ttl">${esc(ni.name || WLCA.shortAddr(w.address))}${ni.src && WLCA.NAME_SRC_TEXT[ni.src] ? ` <span class="mu" style="font-size:12px;font-weight:400">${esc(WLCA.NAME_SRC_TEXT[ni.src])}</span>` : ""}${w.quiet ? ' <span class="mu" style="font-size:12.5px;font-weight:400">（不到 $1K，钱包库预设隐藏）</span>' : ""}</span>
+        <span class="ttl">${esc(ni.name || WLCA.shortAddr(w.address))}${ni.src && WLCA.NAME_SRC_TEXT[ni.src] ? ` <span class="mu" style="font-size:12px;font-weight:400">${esc(WLCA.NAME_SRC_TEXT[ni.src])}</span>` : ""}${w.quiet ? ' <span class="mu" style="font-size:12.5px;font-weight:400">（低盈利，钱包库预设隐藏）</span>' : ""}</span>
         <button class="x" title="关闭" aria-label="关闭">×</button></div>
       <div class="addr"><code>${esc(w.address)}</code><button class="btn cp">拷贝</button></div>
       ${use ? `<div class="k">用途</div><div class="chips" style="margin-bottom:6px">${use}</div>` : ""}
@@ -644,10 +647,22 @@
     for (const [address, w] of Object.entries(data.wallets || {})) info.set(address, WLCA.hasStanding(w) ? w : null);
   }
 
+  function dropStale(rows) {
+    for (const { address, row, place } of rows) {
+      const scope = row || (place && place.parentElement);
+      if (!scope) continue;
+      for (const host of scope.querySelectorAll(TAG)) if (host.getAttribute("data-wl-addr") !== address) host.remove();
+    }
+  }
+
   let again = false;
   async function scan() {
     if (!enabled) return;
-    if (pending) { again = true; return; }
+    if (pending) {
+      again = true;
+      try { dropStale(adapter.rows((text) => WLCA.matchShort(text, candidates))); } catch (_) {  }
+      return;
+    }
     pending = true;
     again = false;
     try {
@@ -665,6 +680,7 @@
       let rows = adapter.rows(resolve);
       const due = document.visibilityState === "visible" && (forceFresh || Date.now() - lastFresh > REFRESH_MS);
       const unknown = [...new Set(rows.map((r) => r.address).filter((a) => due || !info.has(a)))];
+      if (unknown.length) render(rows);
       if (unknown.length && Date.now() - failAt > 15000) {
         const data = await send({ type: "wl-lookup", chain: page.chain, ca: page.ca, addresses: unknown, fresh: due });
         if (data && data.ok !== false) {
@@ -699,17 +715,26 @@
   const OWN = new Set([TAG.toUpperCase(), CARD_TAG.toUpperCase(), "WL-BADGE", "WL-CARD"]);
   const ownOnly = (nodes) => nodes.length > 0 && [...nodes].every((n) => n.nodeType === 1 && OWN.has(n.tagName));
   const observer = new MutationObserver((records) => {
-    let need = false;
+    let need = false, fast = false;
     for (const r of records) {
       const t = r.target;
       if (t && t.nodeType === 1 && OWN.has(t.tagName)) continue;
+      if (r.type === "attributes" && r.attributeName === "data-recycler-key") {
+        const key = String(t.getAttribute("data-recycler-key") || "").split("-")[0];
+        if (/^(0x[0-9a-fA-F]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(key)) {
+          const a = WLCA.norm(key);
+          for (const m of t.querySelectorAll(TAG)) if (m.getAttribute("data-wl-addr") !== a) m.remove();
+          fast = true;
+        }
+      }
       if (r.type === "childList") {
         for (const n of r.removedNodes) if (n.nodeType === 1 && !OWN.has(n.tagName) && n.querySelector(TAG)) { schedule(16); return; }
         if ((ownOnly(r.addedNodes) || ownOnly(r.removedNodes)) && !(r.addedNodes.length && r.removedNodes.length)) continue;
       }
       need = true;
     }
-    if (need) schedule();
+    if (fast) schedule(16);
+    else if (need) schedule();
   });
   listen(window, "resize", () => schedule(120));
   listen(document, "visibilitychange", () => { if (document.visibilityState === "visible") { forceFresh = true; schedule(0); } });

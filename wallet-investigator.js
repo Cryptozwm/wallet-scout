@@ -2990,6 +2990,10 @@ const LIBRARY_LABEL_GROUP = {
   insider: "avoid", bundle_member: "avoid", sniper: "avoid", bot: "avoid",
   kol: "ref", fomo_user: "ref", pump_user: "ref", whale: "ref", top_holder: "ref", bluechip: "ref", transfer_in: "ref",
 };
+for (const tier of ["1M", "500K", "200K", "100K", "50K", "30K", "10K", "5K", "3K"]) {
+  LIBRARY_LABEL_NAMES[`pnl_${tier.toLowerCase()}`] = `赚$${tier}+`;
+  LIBRARY_LABEL_GROUP[`pnl_${tier.toLowerCase()}`] = "follow";
+}
 const LIBRARY_HIDDEN = new Set(["gmgn_bundler"]);
 const libraryShown = (labels) => (labels || []).filter((label) => !LIBRARY_HIDDEN.has(label));
 const gmgnTagsShown = (tags) => (Array.isArray(tags) ? tags : []).filter((tag) => /fomo|pump/i.test(String(tag)));

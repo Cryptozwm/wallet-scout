@@ -1073,7 +1073,8 @@ class Tracker:
         rank = self._rank_tokens(chain) if source == "auto" else []
         self.mine["step"] = "读 pump.fun 热门"
         try:
-            hot = [t for t in pump_hot(chain) if MINE_MIN_ATH <= t["ath"] <= MAX_MEME_MCAP]
+            hot = [t for t in pump_hot(chain, on_wait=lambda: self.mine.update(step="等 Chrome 插件代读 pump.fun 热门（最多 90 秒）"))
+                   if MINE_MIN_ATH <= t["ath"] <= MAX_MEME_MCAP]
         except RuntimeError as exc:
             if source == "pump":
                 raise
@@ -1635,9 +1636,53 @@ def mine_jobs(first: str, source: str, tokens: Any) -> list[tuple[str, list[str]
     return [(c, list(m), m) for c, m in by.items() if m]
 
 
-def pump_hot(chain: str) -> list[dict[str, Any]]:
-    query = urllib.parse.urlencode({"tier": "web", "surface": "TRENDING", "platform": "WEB", "limit": 150,
-                                    "chains": PUMP_HOT_CHAIN[chain], "ranking": "social", "window": "1h", "hot": "label"})
+PUMP_HOT_QUERY = {"tier": "web", "surface": "TRENDING", "platform": "WEB", "limit": 150, "ranking": "social", "window": "1h", "hot": "label"}
+PUMP_FEED_FRESH = 20 * 60
+PUMP_FEED_WAIT = 90
+PUMP_FEED_IDLE = 120
+PUMP_FEED_KEYS = ("m", "t", "i", "age", "ath", "pl", "lp")
+_pump_feed: dict[str, Any] = {"boards": {}, "want": 0.0, "poll": 0.0, "error": "", "errorAt": 0.0}
+_pump_feed_lock = threading.Lock()
+
+
+def pump_feed_want(_payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    now = time.time()
+    with _pump_feed_lock:
+        _pump_feed["poll"] = now
+        want = _pump_feed["want"]
+        got = {c: b["at"] for c, b in _pump_feed["boards"].items()}
+    need = bool(want and now - want < PUMP_FEED_WAIT + 30 and any(got.get(c, 0) < want for c in PUMP_HOT_CHAIN.values()))
+    return {"ok": True, "want": need, "chains": list(PUMP_HOT_CHAIN.values()), "query": PUMP_HOT_QUERY}
+
+
+def pump_feed_put(payload: dict[str, Any]) -> dict[str, Any]:
+    now = time.time()
+    if payload.get("error"):
+        with _pump_feed_lock:
+            _pump_feed["error"], _pump_feed["errorAt"] = str(payload["error"])[:200], now
+        return {"ok": True}
+    chain = str(payload.get("chain") or "")
+    if chain not in PUMP_HOT_CHAIN.values():
+        raise ValueError("pump.fun 热门的链不对")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("pump.fun 热门缺 entries")
+    clean = [{k: (str(e.get(k))[:300] if k in ("m", "t", "i", "pl", "lp") and e.get(k) is not None else e.get(k)) for k in PUMP_FEED_KEYS}
+             for e in entries[:200] if isinstance(e, dict)]
+    with _pump_feed_lock:
+        _pump_feed["boards"][chain] = {"at": now, "serverTs": num(payload.get("serverTs")), "entries": clean}
+        _pump_feed["error"] = ""
+    return {"ok": True, "saved": len(clean)}
+
+
+def pump_feed_status() -> dict[str, Any]:
+    with _pump_feed_lock:
+        return {"boards": {c: {"at": int(b["at"]), "n": len(b["entries"])} for c, b in _pump_feed["boards"].items()},
+                "poll": int(_pump_feed["poll"]), "want": int(_pump_feed["want"]), "error": _pump_feed["error"]}
+
+
+def _pump_hot_direct(chain: str) -> dict[str, Any]:
+    query = urllib.parse.urlencode({**PUMP_HOT_QUERY, "chains": PUMP_HOT_CHAIN[chain]})
     request = urllib.request.Request(f"{PUMP_HOT_URL}?{query}", headers={"User-Agent": UA, "Accept": "application/json",
                                                                           "Origin": "https://pump.fun", "Referer": "https://pump.fun/"})
     try:
@@ -1649,6 +1694,41 @@ def pump_hot(chain: str) -> list[dict[str, Any]]:
         raise RuntimeError(f"pump.fun 热门读不到（{str(exc)[:80]}）") from exc
     if not isinstance(data, dict):
         raise RuntimeError("pump.fun 热门回传格式不对")
+    return data
+
+
+def pump_hot(chain: str, on_wait: Callable[[], None] | None = None) -> list[dict[str, Any]]:
+    name = PUMP_HOT_CHAIN[chain]
+
+    def board(since: float) -> dict[str, Any] | None:
+        with _pump_feed_lock:
+            b = _pump_feed["boards"].get(name)
+        return {"serverTs": b["serverTs"], "entries": b["entries"]} if b and b["at"] >= since else None
+
+    data = board(time.time() - PUMP_FEED_FRESH)
+    if data is None:
+        try:
+            data = _pump_hot_direct(chain)
+        except RuntimeError as exc:
+            direct = str(exc)
+            start = time.time()
+            with _pump_feed_lock:
+                idle = start - _pump_feed["poll"] > PUMP_FEED_IDLE
+                if not idle:
+                    _pump_feed["want"], _pump_feed["error"] = start, ""
+            if idle:
+                raise RuntimeError(f"{direct}：服务器直接读会被 Cloudflare 挡，要开着 Chrome（装好最新版 Wallet Scout 扩展）代读") from exc
+            if on_wait:
+                on_wait()
+            while data is None and time.time() - start < PUMP_FEED_WAIT:
+                time.sleep(1)
+                data = board(start)
+                with _pump_feed_lock:
+                    err, err_at = _pump_feed["error"], _pump_feed["errorAt"]
+                if data is None and err and err_at >= start:
+                    raise RuntimeError(f"pump.fun 热门读不到（{err}）") from exc
+            if data is None:
+                raise RuntimeError(f"pump.fun 热门读不到：等 Chrome 插件代读 {PUMP_FEED_WAIT} 秒没回") from exc
     server_now = int(num(data.get("serverTs")) / 1000) or now_ts()
     out = []
     for e in data.get("entries") or []:
