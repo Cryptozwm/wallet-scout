@@ -348,7 +348,7 @@
   const fomoTokenUrl = (chain, ca) => `https://fomo.family/tokens/${FOMO_CHAINS[chain].slug}/${encodeURIComponent(ca)}`;
   function fomoManualBlock(q, fomo, chain, libCount = 0) {
     const done = Boolean(fomo && fomo.ok);
-    const steps = `<ol class="fomo-steps">
+    const manual = `<ol class="fomo-steps">
         <li><a class="btn btn-sm" id="fomo-open" href="${esc(fomoTokenUrl(chain, q.address))}" target="_blank" rel="noopener">打开这颗币的 FOMO 页</a></li>
         <li>在那页按书签列的「持币」。第一次用先把 <a id="fomo-bm">持币</a> 拖到书签列（书签列没出现就按 Ctrl+Shift+B）；在这颗币的 pump.fun 页按同一颗，会自动开查地址页补上 pump.fun 名字。</li>
         <li>回到这里按 <button type="button" class="btn btn-sm btn-primary" id="fomo-clip">从剪贴板粘贴并比对</button>，或直接按 Ctrl+V。</li>
@@ -358,12 +358,15 @@
         <div class="row-actions"><button type="button" class="btn btn-sm" id="fomo-apply">用粘贴的名单比对</button></div>
       </details>
       <p class="fomo-manual-note">名单附 CA、链和抓取时间，贴错币或错链会被挡下；登录凭证不会传到这里。</p>`;
+    const ext = extBridge.has("fomo-grab");
+    const steps = fomoExtSteps(q, manual);
     if (done) {
       return `<details class="fomo-manual"><summary>FOMO 已比对（${esc(fomo.source || "")}，抓取 ${esc(fomo.fetchedAt || "")}），门槛以上 ${fomo.aboveCutoff ?? 0} 人、对上 ${fomo.matched ?? 0} 人。<span class="fomo-manual-more">重新补上</span></summary>${steps}</details>`;
     }
+    const how = ext ? "按「用插件抓 FOMO 名字」，大约 5～15 秒" : "照下面三步再贴一次，大约 10 秒";
     const title = libCount
-      ? `这次还没贴 FOMO 名单：下表先标出钱包库原本记着的 ${libCount} 个 FOMO 帐号（标「钱包库记录」，之前贴过的都存着，不会不见）。要抓新进前 100 的人，照下面三步再贴一次，大约 10 秒。`
-      : "还没有 FOMO 名单。照下面三步补上，大约 10 秒。";
+      ? `这次还没抓 FOMO 名单：下表先标出钱包库原本记着的 ${libCount} 个 FOMO 帐号（标「钱包库记录」，之前抓过的都存着，不会不见）。要抓新进前 100 的人，${how}。`
+      : `还没有 FOMO 名单。${ext ? "按「用插件抓 FOMO 名字」补上，大约 5～15 秒" : "照下面三步补上，大约 10 秒"}。`;
     return `<section class="fomo-manual is-open" aria-label="补上 FOMO 名字"><p class="fomo-manual-title">${title}</p>${steps}</section>`;
   }
   function applyFomoText(text, quiet) {
@@ -410,6 +413,7 @@
       applyFomoText(text);
     });
     $("fomo-apply").addEventListener("click", () => applyFomoText($("fomo-paste").value));
+    $("fomo-grab")?.addEventListener("click", () => grabFomoViaExt(platformQ));
   }
   let fomoAwaiting = false;
   window.addEventListener("focus", () => {
@@ -475,11 +479,12 @@
         if (first && onReady) onReady(m);
         return;
       }
-      if (m.type === "wi-ext-pump-result" && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+      if (/^wi-ext-(pump|fomo)-result$/.test(m.type) && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
     });
     window.postMessage({ type: "wi-ext-hello" }, location.origin);
     return {
       get ready() { return Boolean(info && (info.features || []).includes("pump-grab")); },
+      has(feature) { return Boolean(info && (info.features || []).includes(feature)); },
       get version() { return info ? info.version : ""; },
       set onReady(fn) { onReady = fn; },
       pumpGrab(ca, cutoff) {
@@ -488,6 +493,14 @@
           const late = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "插件 3 分钟没回应" }); }, 180000);
           waiting.set(id, (m) => { clearTimeout(late); resolve(m); });
           window.postMessage({ type: "wi-ext-pump-grab", id, ca, cutoff }, location.origin);
+        });
+      },
+      fomoGrab(ca, chain) {
+        const id = `fg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        return new Promise((resolve) => {
+          const late = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "插件 2 分钟没回应" }); }, 120000);
+          waiting.set(id, (m) => { clearTimeout(late); resolve(m); });
+          window.postMessage({ type: "wi-ext-fomo-grab", id, ca, chain }, location.origin);
         });
       },
     };
@@ -499,6 +512,7 @@
     }
     if (extBridge.ready) {
       return `<div class="row-actions"><button type="button" class="btn btn-sm btn-primary" id="pump-grab"${q.pumpBusy ? " disabled" : ""}>${q.pumpBusy ? "插件读取中…" : PUMP_BTN}</button></div>
+        ${q.pumpErr ? `<p class="fomo-manual-note"><strong>${esc(q.pumpErr)}</strong></p>` : ""}
         <p class="fomo-manual-note">插件（${esc(extBridge.version)}）会借你 Chrome 开着的 pump.fun 页读这颗币的持有人，没开就在背景开一页、读完自己关掉，大约 5～15 秒；读完自动比对、对上的存进钱包库。pump.fun 要人机验证时会切到那页给你按，不会自己绕过。</p>`;
     }
     return `<ol class="fomo-steps">
@@ -530,10 +544,12 @@
     q.pumpBusy = false;
     if (platformQ !== q) return;
     if (!r || !r.ok) {
+      q.pumpErr = r && r.challenge ? "pump.fun 要先过人机验证：插件已切到 pump.fun 页，验证完回来再按一次" : `插件读 pump.fun 失败：${(r && r.error) || "原因不明"}`;
       renderPump(q);
-      toast(r && r.challenge ? "pump.fun 要先过人机验证：插件已切到 pump.fun 页，验证完回来再按一次" : `插件读 pump.fun 失败：${(r && r.error) || "原因不明"}`);
+      toast(q.pumpErr);
       return;
     }
+    q.pumpErr = "";
     q.pumpList = { ca: q.address, at: Number(r.at) || Date.now(), positions: Array.isArray(r.positions) ? r.positions : [], via: "ext" };
     toast(`收到 ${q.pumpList.positions.length} 笔 pump.fun 持有人，比对中`);
     loadPlatform(q);
@@ -544,7 +560,46 @@
     q.pumpAuto = true;
     grabPumpViaExt(q);
   }
-  extBridge.onReady = () => { if (platformQ && platformQ.pumpStatus && !platformQ.pumpStatus.skipped) { renderPump(platformQ); maybeAutoPump(platformQ); } };
+  const FOMO_BTN = "用插件抓 FOMO 名字";
+  function fomoExtSteps(q, manual) {
+    if (!extBridge.has("fomo-grab")) return manual;
+    return `<div class="row-actions"><button type="button" class="btn btn-sm btn-primary" id="fomo-grab"${q.fomoBusy ? " disabled" : ""}>${q.fomoBusy ? "插件读取中…" : FOMO_BTN}</button></div>
+      ${q.fomoErr ? `<p class="fomo-manual-note"><strong>${esc(q.fomoErr)}</strong></p>` : ""}
+      <p class="fomo-manual-note">插件（${esc(extBridge.version)}）用你这个 Chrome 的 FOMO 登录，在 FOMO 页里读这颗币的前 99 位持有人（跟「持币」书签同一个请求，登录数据不会离开 FOMO 页）；没开 FOMO 页会在背景开一页、读完自己关掉。没登录或被拒时会切到 FOMO 页给你处理，不会自己登录或绕过。只在你按的时候读一次。</p>
+      <details class="fomo-fallback"><summary>不用插件：照书签三步粘贴</summary>${manual}</details>`;
+  }
+  function renderFomo(q) {
+    const box = $("fomo-wrap");
+    if (!box || platformQ !== q || !q.fomoView) return;
+    box.innerHTML = fomoManualBlock(q, q.fomoView.fomo, q.fomoView.chain, q.fomoView.libFomo);
+    wireFomoManual();
+  }
+  async function grabFomoViaExt(q) {
+    if (!q || q.fomoBusy || !extBridge.has("fomo-grab")) return;
+    q.fomoBusy = true;
+    q.fomoErr = "";
+    renderFomo(q);
+    toast("插件在读 FOMO 持有人…");
+    const r = await extBridge.fomoGrab(q.address, platformChain(q));
+    q.fomoBusy = false;
+    if (platformQ !== q) return;
+    if (!r || !r.ok || !r.list) {
+      q.fomoErr = `插件读 FOMO 失败：${(r && r.error) || "原因不明"}`;
+      renderFomo(q);
+      toast(q.fomoErr);
+      return;
+    }
+    renderFomo(q);
+    if (!applyFomoText(JSON.stringify({ ...r.list, via: "ext" }))) {
+      q.fomoErr = "插件读回来的不是这颗币的 FOMO 名单";
+      renderFomo(q);
+    }
+  }
+  extBridge.onReady = () => {
+    if (!platformQ) return;
+    if (platformQ.fomoView) renderFomo(platformQ);
+    if (platformQ.pumpStatus && !platformQ.pumpStatus.skipped) { renderPump(platformQ); maybeAutoPump(platformQ); }
+  };
 
   let platformQ = null;
   function platformChain(q) {
@@ -568,6 +623,7 @@
       const r = await res.json().catch(() => ({}));
       if (!res.ok || !r.ok) throw new Error(r.error || `HTTP ${res.status}`);
       if (q.pumpList?.via === "ext" && r.status?.pumpfun?.source === "书签代查") r.status.pumpfun.source = "插件代查";
+      if (q.fomoList?.via === "ext" && r.status?.fomo?.source === "书签小工具粘贴") r.status.fomo.source = "插件代查";
       if (platformQ !== q && !fomoList) return;
       const prevStored = q.platformStored || null;
       let stored = {}, storedOk = false;
@@ -619,7 +675,7 @@
       card.innerHTML = `<p class="trace-data-note">GMGN 前 100 持有人里，${hits} 个地址有 ${plats} 帐号${libOnly ? `（这次名单对上 ${live} 个；另外 ${libOnly} 个是钱包库原本记着的，标「钱包库记录」）` : ""}。快照 ${esc(r.snapshotLocal)}。</p>
         ${savedBox}
         ${libLine ? `<p class="trace-data-note">${libLine}</p>` : ""}
-        ${hasFomo ? fomoManualBlock(q, r.status.fomo, chain, libFomo) : ""}
+        ${hasFomo ? `<div id="fomo-wrap">${fomoManualBlock(q, r.status.fomo, chain, libFomo)}</div>` : ""}
         ${hasPump ? `<div id="pump-wrap"></div>` : ""}
         <div class="table-wrap trace-section"><table><thead><tr><th>#</th><th>完整地址</th><th>持有数量</th><th>持有%</th><th>USD</th><th>GMGN 盈亏 总/已实现/未实现</th><th>GMGN 标签</th><th>GMGN 名称</th><th>推特</th><th>平台</th><th>平台帐号</th><th>FOMO 粉丝</th>${hasPump ? "<th>pump.fun X</th>" : ""}<th>链接</th></tr></thead><tbody>${rows}</tbody></table></div>
         <details class="footnote"><summary>比对规则与数据状态</summary>
@@ -627,6 +683,7 @@
           <ul>${st}</ul>
           ${unmatched ? `<p>没对上（不标）：<br>${unmatched}</p>` : ""}
         </details>`;
+      q.fomoView = hasFomo ? { fomo: r.status.fomo, chain, libFomo } : null;
       if (hasFomo) wireFomoManual();
       q.pumpStatus = r.status.pumpfun || null;
       q.pumpCutoff = Number(r.cutoff) || 0;

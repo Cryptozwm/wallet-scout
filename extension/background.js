@@ -196,15 +196,15 @@ async function platMatch(msg) {
 }
 
 const PUMP_TABS = ["https://pump.fun/*", "https://www.pump.fun/*"];
-async function waitTabLoaded(tabId, ms = 30000) {
+async function waitTabLoaded(tabId, ms = 30000, site = /^https:\/\/(www\.)?pump\.fun\//, name = "pump.fun") {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     const t = await chrome.tabs.get(tabId).catch(() => null);
-    if (!t) throw new Error("pump.fun 分页被关掉了");
-    if (t.status === "complete" && /^https:\/\/(www\.)?pump\.fun\//.test(t.url || "")) return t;
+    if (!t) throw new Error(`${name} 分页被关掉了`);
+    if (t.status === "complete" && site.test(t.url || "")) return t;
     await new Promise((r) => setTimeout(r, 400));
   }
-  throw new Error("pump.fun 页 30 秒还没载完");
+  throw new Error(`${name} 页 ${Math.round(ms / 1000)} 秒还没载完`);
 }
 async function pumpFetchInPage(ca, cutoff) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -265,6 +265,74 @@ async function pumpGrab(msg) {
     }
     if (!r.ok) return { ok: false, error: r.error || "读 pump.fun 持有人失败" };
     return { ok: true, ca, at: r.at, positions: r.positions, pages: r.pages, more: r.more, borrowed: !opened };
+  } finally {
+    if (opened) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+const FOMO_TABS = ["https://fomo.family/*", "https://www.fomo.family/*"];
+const FOMO_NET = { bsc: { slug: "bnb", nid: 56 }, sol: { slug: "solana", nid: 1399811149 }, robinhood: { slug: "robinhood", nid: 4663 } };
+async function fomoFetchInPage(ca, nid) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const token = () => {
+    try {
+      let t = JSON.parse(localStorage.getItem("privy:token") || "null");
+      for (let i = 0; !t && i < localStorage.length; i += 1) {
+        const k = localStorage.key(i);
+        if (/^privy:[^:]+:token$/.test(k || "")) t = JSON.parse(localStorage.getItem(k) || "null");
+      }
+      return t;
+    } catch (_) { return null; }
+  };
+  for (let k = 0; k < 3; k += 1) {
+    if (k) await sleep(2500);
+    const t = token();
+    if (!t) { if (k < 2) continue; return { ok: false, login: true }; }
+    let r;
+    try {
+      r = await fetch("https://prod-api.fomo.family/hodlers/top?tokens=" + encodeURIComponent(JSON.stringify([{ address: ca, networkId: nid }])), {
+        headers: { Accept: "application/json", "X-Supported-Chains": nid === 56 ? "solana,base,bnb" : "1,56,143,4663,5042,8453,1399811149", Authorization: "Bearer " + t } });
+    } catch (_) { if (k < 2) continue; return { ok: false, error: "连不上 FOMO" }; }
+    if (r.status === 401) { if (k < 2) continue; return { ok: false, login: true }; }
+    if (r.status === 403) return { ok: false, refused: true };
+    if (r.status === 429) return { ok: false, error: "FOMO 叫我们慢一点（HTTP 429）：等一两分钟再按" };
+    if (!r.ok) return { ok: false, error: `FOMO 回 HTTP ${r.status}` };
+    let j;
+    try { j = await r.json(); } catch (_) { return { ok: false, refused: true }; }
+    const d = (j.responseObject || [])[0] || {};
+    return { ok: true, list: { ca: nid === 1399811149 ? ca : ca.toLowerCase(), networkId: nid, at: Date.now(), total: d.totalHolders,
+      holders: (d.topHolders || []).map((x) => ({ handle: x.user && x.user.userHandle, followers: x.user && x.user.followers, amount: +x.humanAmount, pnl: x.pnl })) } };
+  }
+  return { ok: false, error: "读 FOMO 持有人失败" };
+}
+async function fomoGrabBg(msg) {
+  const ca = String(msg.ca || "").trim();
+  const net = FOMO_NET[String(msg.chain || "")];
+  if (!net) throw new Error("FOMO 只有 BSC、Solana、Robinhood 的币");
+  if (!(net.nid === 1399811149 ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/ : /^0x[0-9a-fA-F]{40}$/).test(ca)) throw new Error("CA 格式不对");
+  const tabs = await chrome.tabs.query({ url: FOMO_TABS }).catch(() => []);
+  const same = (u) => String(u || "").toLowerCase().includes(`/tokens/${net.slug}/${ca.toLowerCase()}`);
+  let tab = tabs.find((t) => same(t.url)) || tabs.find((t) => t.status === "complete") || null;
+  let opened = false;
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: `https://fomo.family/tokens/${net.slug}/${encodeURIComponent(ca)}`, active: false });
+    opened = true;
+  }
+  try {
+    await waitTabLoaded(tab.id, 30000, /^https:\/\/(www\.)?fomo\.family\//, "FOMO");
+    if (opened) await new Promise((r) => setTimeout(r, 2500));
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: fomoFetchInPage, args: [ca, net.nid] });
+    const r = res && res.result;
+    if (!r) throw new Error("FOMO 页没回应");
+    if (r.login || r.refused) {
+      opened = false;
+      await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      return { ok: false, login: Boolean(r.login), refused: Boolean(r.refused),
+        error: r.login ? "FOMO 没登录（或登录过期）：已切到 FOMO 页，登录后回来再按一次" : "FOMO 拒绝这次读取（HTTP 403）：已切到 FOMO 页，确认有登录、过完验证再按一次" };
+    }
+    if (!r.ok) return { ok: false, error: r.error || "读 FOMO 持有人失败" };
+    return { ok: true, ca, list: r.list, borrowed: !opened };
   } finally {
     if (opened) chrome.tabs.remove(tab.id).catch(() => {});
   }
@@ -376,6 +444,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return { ok: true };
       case "wl-plat-match": return platMatch(msg);
       case "wl-pump-grab": return pumpGrab(msg);
+      case "wl-fomo-grab": return fomoGrabBg(msg);
       default:
         return { ok: false, error: "不认得的消息" };
     }

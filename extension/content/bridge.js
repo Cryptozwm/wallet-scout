@@ -4,7 +4,7 @@
   const life = new AbortController();
   document.addEventListener("wl-bridge-takeover", () => life.abort(), { once: true, signal: life.signal });
   const VER = chrome.runtime.getManifest().version;
-  const FEATURES = ["pump-grab"];
+  const FEATURES = ["pump-grab", "fomo-grab"];
   let mine = null;
   const ask = (msg) => new Promise((resolve) => {
     try {
@@ -29,9 +29,16 @@
       if (await isServer()) say({ type: "wi-ext-ready", version: VER, features: FEATURES });
       return;
     }
-    if (m.type !== "wi-ext-pump-grab" || !(await isServer())) return;
-    const r = await ask({ type: "wl-pump-grab", ca: String(m.ca || "").slice(0, 64), cutoff: Number(m.cutoff) || 0 });
-    say({ ...r, type: "wi-ext-pump-result", id: String(m.id || "") });
+    const ca = String(m.ca || "").slice(0, 64);
+    if (m.type === "wi-ext-pump-grab") {
+      if (!(await isServer())) return;
+      const r = await ask({ type: "wl-pump-grab", ca, cutoff: Number(m.cutoff) || 0 });
+      say({ ...r, type: "wi-ext-pump-result", id: String(m.id || "") });
+    } else if (m.type === "wi-ext-fomo-grab") {
+      if (!(await isServer())) return;
+      const r = await ask({ type: "wl-fomo-grab", ca, chain: String(m.chain || "").slice(0, 16) });
+      say({ ...r, type: "wi-ext-fomo-result", id: String(m.id || "") });
+    }
   }, { signal: life.signal });
   isServer().then((ok) => { if (ok && !life.signal.aborted) say({ type: "wi-ext-ready", version: VER, features: FEATURES }); });
 })();

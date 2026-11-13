@@ -273,7 +273,8 @@ function renderPlat() {
   const html = `
     <div class="prow"><span class="pn">FOMO</span>${cnt("FOMO")}${bmLink}
       <button type="button" class="btn sm" data-plat="fomo-open" title="开这颗币的 FOMO 页，在那页按书签列的「持币」拷贝名单">开 FOMO</button>
-      <button type="button" class="btn sm pri" data-plat="fomo-paste"${st.busy ? " disabled" : ""} title="在 FOMO 页按「持币」书签后，回来按这颗（也可以在面板上直接 Ctrl+V）">${st.busy === "fomo" ? "比对中…" : "粘贴名单"}</button></div>
+      <button type="button" class="btn sm" data-plat="fomo-paste"${st.busy ? " disabled" : ""} title="不用插件抓的话：在 FOMO 页按「持币」书签后，回来按这颗粘贴名单（也可以在面板上直接 Ctrl+V）">粘贴</button>
+      <button type="button" class="btn sm pri" data-plat="fomo-grab"${st.busy ? " disabled" : ""} title="用你这个 Chrome 的 FOMO 登录读这颗币的 FOMO 持有人（前 99 位，跟「持币」书签同一个请求），跟前 100 比对（没开 FOMO 页会在背景开一页，读完关掉；没登录会切到 FOMO 页给你登录）">${st.busy === "fomo" ? "抓取中…" : "抓名字"}</button></div>
     ${msg(st.fomo)}
     ${st.paste ? `<textarea class="ppaste" data-plat="fomo-text" rows="2" spellcheck="false" placeholder="剪贴板读不到：点这格按 Ctrl+V 粘贴 FOMO 名单"></textarea>` : ""}
     <div class="prow"><span class="pn">pump.fun</span>${cnt("pump.fun")}
@@ -364,6 +365,17 @@ async function pumpGrab() {
   if (!g || g.ok === false) { state.plat.busy = ""; setPlatMsg("pump", (g && g.error) || "读 pump.fun 失败", true); return; }
   if (!(g.positions || []).length) { state.plat.busy = ""; setPlatMsg("pump", `${hhmm()} pump.fun 上没有 pump.fun 用户持有这颗币，没有名字可以对`); return; }
   runMatch("pump", { pumpList: { ca: p.ca, at: g.at, positions: g.positions } }, `收到 ${g.positions.length} 笔 pump.fun 持有人，跟前 100 比对中…`);
+}
+async function fomoGrabExt() {
+  const p = state.page;
+  const key = platKey();
+  state.plat.busy = "fomo";
+  setPlatMsg("fomo", "读 FOMO 持有人中…（用你这个 Chrome 的 FOMO 登录；没开 FOMO 页会在背景开一页，读完关掉）");
+  const g = await send({ type: "wl-fomo-grab", chain: p.chain, ca: p.ca });
+  if (platKey() !== key) return;
+  if (!g || g.ok === false || !g.list) { state.plat.busy = ""; setPlatMsg("fomo", (g && g.error) || "读 FOMO 失败", true); return; }
+  if (!(g.list.holders || []).length) { state.plat.busy = ""; setPlatMsg("fomo", `${hhmm()} FOMO 上没有 FOMO 用户持有这颗币，没有名字可以对`); return; }
+  runMatch("fomo", { fomoList: g.list }, `收到 ${g.list.holders.length} 笔 FOMO 持有人，跟前 100 比对中…`);
 }
 async function runMatch(kind, extra, startText) {
   const p = state.page;
@@ -897,6 +909,7 @@ function bind() {
     else if (act === "pump-open") platOpen("pump");
     else if (act === "fomo-paste") fomoPaste();
     else if (act === "pump-grab") pumpGrab();
+    else if (act === "fomo-grab") fomoGrabExt();
   });
   document.addEventListener("paste", (e) => {
     if (!state.page || !PLAT_CHAINS[state.page.chain] || state.plat.busy || state.wallet) return;
