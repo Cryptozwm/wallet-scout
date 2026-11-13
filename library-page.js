@@ -492,7 +492,8 @@ if (typeof document !== "undefined") {
       try {
         const r = await ask();
         if (!r || !r.ok || !r.board) throw new Error((r && r.error) || "读 FOMO 排行榜失败");
-        const periods = Object.entries(r.board.periods || {}).map(([p, n]) => `${FOMO_PERIOD_NAME[p] || p} ${n} 位`).join("、");
+        const got = r.board.periods || {};
+        const periods = ["24h", "7d", "30d", "all"].filter((p) => p in got).map((p) => `${FOMO_PERIOD_NAME[p]} ${got[p]} 位`).join("、");
         const head = `读到 FOMO 排行榜 ${periods}，共 ${r.board.users.length} 人${r.why ? `（${r.why}，后面的榜没读）` : ""}`;
         say(`${head}，存进钱包库中…`);
         const res = await libraryPost("/api/fomo/board-import", { board: r.board });

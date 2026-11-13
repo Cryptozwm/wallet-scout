@@ -350,7 +350,7 @@ async function fomoBoardInPage() {
       return t;
     } catch (_) { return null; }
   };
-  const want = { "24h": /^pnl_?24h$/i, "7d": /^pnl_?7d$/i, "30d": /^pnl_?30d$/i, all: /^pnl_?(all|alltime|total)$/i };
+  const want = { "24h": /^pnl_?24h$/i, "7d": /^pnl_?7d$/i, "30d": /^pnl_?30d$/i, all: /^(pnl_?(all|alltime|total)|total_?pnl(_?usd)?)$/i };
   const users = new Map(), periods = {}, skipped = [], pnlKeys = {};
   let why = "";
   const P = ["24h", "7d", "30d", "all"];
@@ -363,7 +363,7 @@ async function fomoBoardInPage() {
       const t = token();
       if (!t) { r = { status: 401 }; continue; }
       try {
-        r = await fetch(`https://prod-api.fomo.family/v2/leaderboard/${p}?tradeType=spot`, {
+        r = await fetch(`https://prod-api.fomo.family/v2/leaderboard${p === "all" ? "" : `/${p}`}?tradeType=spot`, {
           headers: { Accept: "application/json", "X-Supported-Chains": "1,56,143,4663,5042,8453,1399811149", Authorization: "Bearer " + t } });
       } catch (_) { r = null; continue; }
       if (r.status !== 401) break;
@@ -386,7 +386,7 @@ async function fomoBoardInPage() {
       const u = users.get(key) || { h: hd, n: String(x.displayName || "").slice(0, 40), f: Number(x.followers) || 0, v: !!x.verified, x: String(tw).slice(0, 20),
         ranks: {}, pnl: {}, pk: {}, hold: [] };
       u.ranks[p] = idx + 1;
-      const keys = Object.keys(x).filter((kk) => /^pnl/i.test(kk) && typeof x[kk] === "number");
+      const keys = Object.keys(x).filter((kk) => /pnl/i.test(kk) && typeof x[kk] === "number");
       if (!idx) pnlKeys[p] = Object.keys(x).filter((kk) => /pnl|profit/i.test(kk)).slice(0, 12);
       const pk = keys.find((kk) => want[p].test(kk)) || keys.find((kk) => /^pnl_?(usd|value)?$/i.test(kk));
       if (pk) { u.pnl[p] = Math.round(x[pk]); u.pk[p] = pk; }

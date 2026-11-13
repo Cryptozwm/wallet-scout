@@ -159,7 +159,7 @@ def _amount(v: Any) -> Decimal | None:
     return d if d.is_finite() and d > 0 else None
 
 
-PNL_FIELD = {"24h": r"pnl_?24h", "7d": r"pnl_?7d", "30d": r"pnl_?30d", "all": r"pnl_?(all|alltime|total)"}
+PNL_FIELD = {"24h": r"pnl_?24h", "7d": r"pnl_?7d", "30d": r"pnl_?30d", "all": r"(pnl_?(all|alltime|total)|total_?pnl(_?usd)?)"}
 
 
 def pnl_field_ok(period: str, field: str) -> bool:
