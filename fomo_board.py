@@ -159,6 +159,14 @@ def _amount(v: Any) -> Decimal | None:
     return d if d.is_finite() and d > 0 else None
 
 
+PNL_FIELD = {"24h": r"pnl_?24h", "7d": r"pnl_?7d", "30d": r"pnl_?30d", "all": r"pnl_?(all|alltime|total)"}
+
+
+def pnl_field_ok(period: str, field: str) -> bool:
+    f = (field or "").lower()
+    return bool(period in PNL_FIELD and (re.fullmatch(PNL_FIELD[period], f) or re.fullmatch(r"pnl_?(usd|value)?", f)))
+
+
 def parse_board(board: Any) -> list[dict[str, Any]]:
     if not isinstance(board, dict) or board.get("kind") != "fomo-board" or not isinstance(board.get("users"), list):
         raise ValueError("排行榜格式不对")
@@ -183,11 +191,20 @@ def parse_board(board: Any) -> list[dict[str, Any]]:
             elif nid in EVM_NID and EVM_ADDR.fullmatch(ca) and not any(e[1] == ca.lower() for e in evm):
                 evm.append((EVM_NID[nid], ca.lower(), amt))
         ranks = {p: int(r) for p, r in (u.get("ranks") or {}).items() if p in PERIODS and isinstance(r, (int, float)) and 0 < r < 10000} if isinstance(u.get("ranks"), dict) else {}
+        fields = {p: re.sub(r"[^\w]", "", str(v))[:40] for p, v in (u.get("pk") or {}).items() if p in PERIODS} if isinstance(u.get("pk"), dict) else {}
+        pnl = {}
+        for p, v in (u.get("pnl") or {}).items() if isinstance(u.get("pnl"), dict) else []:
+            n = wallet_library.num(v)
+            if p in PERIODS and pnl_field_ok(p, fields.get(p, "")) and n is not None and math.isfinite(n) and abs(n) < 1e10:
+                pnl[p] = n
+        fields = {p: f for p, f in fields.items() if p in pnl}
         x = re.sub(r"[^A-Za-z0-9_]", "", str(u.get("x") or "").lstrip("@"))[:15]
         f = wallet_library.num(u.get("f"))
         prev = users.get(key)
         if prev:
             prev["ranks"].update(ranks)
+            prev["pnl"].update(pnl)
+            prev["fields"].update(fields)
             for h in hold:
                 if not any(p[0] == h[0] for p in prev["hold"]):
                     prev["hold"].append(h)
@@ -196,7 +213,8 @@ def parse_board(board: Any) -> list[dict[str, Any]]:
                     prev["evm"].append(e)
             continue
         users[key] = {"handle": handle, "followers": int(f) if f is not None and f >= 0 else None,
-                      "verified": None if u.get("v") is None else bool(u.get("v")), "x": x, "ranks": ranks, "hold": hold[:5], "evm": evm[:5]}
+                      "verified": None if u.get("v") is None else bool(u.get("v")), "x": x, "ranks": ranks, "hold": hold[:5], "evm": evm[:5],
+                      "pnl": pnl, "fields": fields}
     return list(users.values())
 
 
@@ -432,7 +450,7 @@ def _bind(picked: list[dict[str, Any]]) -> None:
 
 def _snapshot() -> dict[str, Any]:
     keys = ("running", "phase", "startedAt", "finishedAt", "total", "withSol", "withEvm", "done", "bound", "added", "same", "renamedCount", "inLibrary",
-            "libAdded", "solBound", "evmBound", "missed", "conflict", "weak", "noSol", "rpc", "error", "periods")
+            "libAdded", "solBound", "evmBound", "missed", "conflict", "weak", "noSol", "rpc", "error", "periods", "pnlSaved", "pnlKeys")
     s = {k: _job.get(k) for k in keys if k in _job}
     s["rows"] = list(_job.get("rows", []))[:600]
     s["renamed"] = list(_job.get("renamed", []))[:100]
@@ -479,14 +497,17 @@ def start(board: Any, runner: Callable[[Callable[[], None]], None] | None = None
     users = parse_board(board)
     if not users:
         raise ValueError("排行榜里没有可以用的名字")
+    saved = wallet_library.fomo_board_pnl_save(users)
+    raw_keys = board.get("pnlKeys") if isinstance(board.get("pnlKeys"), dict) else {}
+    pnl_keys = {p: [re.sub(r"[^\w]", "", str(k))[:40] for k in v[:12]] for p, v in raw_keys.items() if p in PERIODS and isinstance(v, list)}
     with _lock:
         if _job.get("running"):
-            raise RuntimeError("上一批 FOMO 排行榜还在反查，等它跑完再贴")
+            raise RuntimeError(f"上一批 FOMO 排行榜还在反查，等它跑完再贴（这次的 {saved} 笔盈利已经存好）")
         periods = board.get("periods") if isinstance(board.get("periods"), dict) else {}
         _job.clear()
         _job.update(running=True, phase="sol", startedAt=int(time.time()), finishedAt=None, total=len(users), withSol=sum(bool(u["hold"]) for u in users),
                     withEvm=sum(bool(u["evm"]) for u in users), done=0, bound=0, added=0, same=0, renamedCount=0, inLibrary=0, libAdded=0, solBound=0, evmBound=0,
-                    missed=0, conflict=0, weak=0, noSol=0, rpc=0, error="",
+                    missed=0, conflict=0, weak=0, noSol=0, rpc=0, error="", pnlSaved=saved, pnlKeys=pnl_keys,
                     periods={k: int(v) for k, v in periods.items() if k in PERIODS and isinstance(v, (int, float))}, rows=[], renamed=[], why={},
                     evm={"users": 0, "known": 0, "tokens": 0, "done": 0, "saved": 0, "skipped": 0, "failed": 0, "conflict": 0, "error": "", "lastError": ""},
                     evmWhy={})

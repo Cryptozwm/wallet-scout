@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import math
 import os
 import re
 import sqlite3
@@ -204,6 +205,11 @@ CREATE TABLE IF NOT EXISTS plat_accounts (
   handle TEXT DEFAULT '', wallet TEXT DEFAULT '', total REAL, realized REAL, cost REAL, coins INTEGER, wins INTEGER, untrusted INTEGER,
   trades INTEGER, since INTEGER, partial INTEGER DEFAULT 0, at INTEGER, tried INTEGER, note TEXT DEFAULT '',
   PRIMARY KEY (chain, address, platform)
+);
+-- FOMO 排行榜上的盈利：FOMO 自己算的，照名字（小写）记，24h／7d／30d／all 各一笔、新的盖旧的；导出时照 FOMO 名字对到钱包
+CREATE TABLE IF NOT EXISTS fomo_board_pnl (
+  handle TEXT NOT NULL, period TEXT NOT NULL, pnl REAL, rank INTEGER, field TEXT DEFAULT '', at INTEGER,
+  PRIMARY KEY (handle, period)
 );
 CREATE INDEX IF NOT EXISTS idx_rel_src ON relations(chain, src);
 CREATE INDEX IF NOT EXISTS idx_rel_dst ON relations(chain, dst);
@@ -1264,6 +1270,7 @@ def export_all() -> dict[str, Any]:
             rels = [dict(r) for r in conn.execute("SELECT * FROM relations ORDER BY chain, src, dst")]
             tokens = [dict(r) for r in conn.execute("SELECT * FROM tokens ORDER BY queried_at DESC")]
             names = [dict(r) | {"cas": loads(r["cas"])} for r in conn.execute("SELECT * FROM platform_names ORDER BY chain, address")]
+            fomo_pnl = fomo_board_pnl_index(conn)
         finally:
             conn.close()
     platform_keys = {(n["chain"], n["address"]) for n in names}
@@ -1295,6 +1302,7 @@ def export_all() -> dict[str, Any]:
         w["best"], w["bundles"] = best.get(key), bundles.get(key, [])
         w["plat"] = plat.get(key)
         w["gmgnOk"] = gmgn_overall_ok((w["pf"] or {}).get("buys"), plat_apps.get(key, [])) if key in platform_keys else True
+        w["fomo"] = fomo_pnl_for(plats.get(key), fomo_pnl)
     return {"ok": True, "wallets": wallets, "appearances": apps, "relations": rels, "tokens": tokens, "platformNames": names, "rules": RULES,
             "groups": LABEL_GROUPS, "platRule": PLAT_RULE, "bots": status, "cardRule": CARD_RULE, "useLabels": USE_LABEL,
             "highFreq": HIGH_FREQ_TRADES, "acctRule": PLAT_ACCT_RULE}
@@ -2419,6 +2427,54 @@ def plat_accounts_index(conn: sqlite3.Connection, chain: str = "", address: str 
             "coins": r["coins"], "wins": r["wins"], "untrusted": r["untrusted"], "trades": r["trades"], "since": r["since"],
             "partial": bool(r["partial"]), "at": r["at"], "tried": r["tried"], "note": r["note"] or ""}
     return out
+
+
+FOMO_BOARD_PERIODS = ("24h", "7d", "30d", "all")
+
+
+def fomo_board_pnl_save(users: list[dict[str, Any]]) -> int:
+    now = int(time.time())
+    saved = 0
+    with LOCK:
+        conn = connect()
+        try:
+            for u in users:
+                handle = str(u.get("handle") or "").strip().lower()[:80]
+                pnl = u.get("pnl") if isinstance(u.get("pnl"), dict) else {}
+                if not handle:
+                    continue
+                for period in FOMO_BOARD_PERIODS:
+                    value = num(pnl.get(period))
+                    if value is None or not math.isfinite(value) or abs(value) >= 1e10:
+                        continue
+                    rank = num((u.get("ranks") or {}).get(period)) if isinstance(u.get("ranks"), dict) else None
+                    field = str((u.get("fields") or {}).get(period) or "")[:40] if isinstance(u.get("fields"), dict) else ""
+                    conn.execute("INSERT INTO fomo_board_pnl (handle, period, pnl, rank, field, at) VALUES (?,?,?,?,?,?) "
+                                 "ON CONFLICT(handle, period) DO UPDATE SET pnl=excluded.pnl, rank=excluded.rank, field=excluded.field, at=excluded.at",
+                                 (handle, period, value, int(rank) if rank and 0 < rank < 100000 else None, field, now))
+                    saved += 1
+            conn.commit()
+        finally:
+            conn.close()
+    return saved
+
+
+def fomo_board_pnl_index(conn: sqlite3.Connection) -> dict[str, dict[str, dict[str, Any]]]:
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for r in conn.execute("SELECT handle, period, pnl, rank, field, at FROM fomo_board_pnl"):
+        out.setdefault(r["handle"], {})[r["period"]] = {"pnl": r["pnl"], "rank": r["rank"], "field": r["field"] or "", "at": r["at"]}
+    return out
+
+
+def fomo_pnl_for(platform_rows: list[dict[str, Any]] | None, index: dict[str, dict[str, dict[str, Any]]]) -> dict[str, dict[str, Any]] | None:
+    out: dict[str, dict[str, Any]] = {}
+    for p in platform_rows or []:
+        if p.get("platform") != "FOMO":
+            continue
+        for period, entry in (index.get(str(p.get("handle") or "").lower()) or {}).items():
+            if period not in out or (entry.get("at") or 0) > (out[period].get("at") or 0):
+                out[period] = entry
+    return out or None
 
 
 def rename_platform_handle(conn: sqlite3.Connection, chain: str, address: str, platform: str, new: str) -> list[str]:

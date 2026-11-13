@@ -4,7 +4,7 @@
   const life = new AbortController();
   document.addEventListener("wl-bridge-takeover", () => life.abort(), { once: true, signal: life.signal });
   const VER = chrome.runtime.getManifest().version;
-  const FEATURES = ["pump-grab", "fomo-grab"];
+  const FEATURES = ["pump-grab", "fomo-grab", "fomo-board"];
   let mine = null;
   const ask = (msg) => new Promise((resolve) => {
     try {
@@ -38,6 +38,10 @@
       if (!(await isServer())) return;
       const r = await ask({ type: "wl-fomo-grab", ca, chain: String(m.chain || "").slice(0, 16) });
       say({ ...r, type: "wi-ext-fomo-result", id: String(m.id || "") });
+    } else if (m.type === "wi-ext-fomo-board") {
+      if (!(await isServer())) return;
+      const r = await ask({ type: "wl-fomo-board" });
+      say({ ...r, type: "wi-ext-fomo-board-result", id: String(m.id || "") });
     }
   }, { signal: life.signal });
   isServer().then((ok) => { if (ok && !life.signal.aborted) say({ type: "wi-ext-ready", version: VER, features: FEATURES }); });

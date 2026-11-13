@@ -95,7 +95,7 @@
   <dialog class="sheet" id="platform-export-dialog" aria-labelledby="platform-export-title">
     <div class="sheet-head"><h2 id="platform-export-title">导出到 DeBot／GMGN</h2><button type="button" class="btn btn-ghost btn-icon" id="platform-export-close" aria-label="关闭"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <div class="sheet-body">
-      <p class="sheet-note">把钱包库的钱包排成导入格式。备注最前面是实力等级（例如 S级，他自己 30 天赚不赚，不代表跟了会赚），再写要避开的（⚠ 开头）、高手标签，最多 4 个标签，最后接平台帐号（例如 pump:帐号(X:帐号)）和战绩。平台用户（FOMO／pump.fun）的盈亏只写平台自己算的，不写 GMGN 的数字：pump.fun 用户算过帐号总盈亏的写「pump总+12.3K」（每颗交易过的币加总），其他写「平台盈亏CC+2.2K」（钱包库里那几颗币）；其他钱包才写 GMGN 总盈利、30 天胜率（「GMGN总+1.2K」）。同源捆绑写成「⚠币名捆1」：同一颗币的同一组都是 1，下一组是 2。GMGN 自己的捆绑标签分不出组，不写进备注。拷贝后到 DeBot 或 GMGN 的导入框粘贴。</p>
+      <p class="sheet-note">把钱包库的钱包排成导入格式。备注最前面是实力等级（例如 S级，他自己 30 天赚不赚，不代表跟了会赚），再写要避开的（⚠ 开头）、高手标签，最多 4 个标签，最后接平台帐号（例如 pump:帐号(X:帐号)）和战绩。平台用户（FOMO／pump.fun）的盈亏只写平台自己算的，不写 GMGN 的数字：pump.fun 用户算过帐号总盈亏的写「pump总+12.3K」（每颗交易过的币加总），FOMO 用户有排行榜盈利的写「FOMO总+12.3K」（全部榜）或「FOMO30天+5K」（只有那段时间的榜），其他写「平台盈亏CC+2.2K」（钱包库里那几颗币）；其他钱包才写 GMGN 总盈利、30 天胜率（「GMGN总+1.2K」）。同源捆绑写成「⚠币名捆1」：同一颗币的同一组都是 1，下一组是 2。GMGN 自己的捆绑标签分不出组，不写进备注。拷贝后到 DeBot 或 GMGN 的导入框粘贴。</p>
       <div class="sheet-group">
         <div class="export-pick-head"><h3>要导出</h3><button type="button" class="btn btn-sm btn-ghost" id="export-reset">恢复预设</button></div>
         <p class="sheet-note">任一个符合就导出，数字是这条链各有几个；同一个钱包只会出现一次，符合的标签都写进备注。</p>
@@ -195,6 +195,6 @@
   <script src="./shell.js?v=20261111-card"></script>
   <script src="./wallet-investigator.js?v=20261112-libtools"></script>
   <script src="./bookmarklet.js?v=20261112-fboard"></script>
-  <script src="./library-page.js?v=20261113-exportfine"></script>
+  <script src="./library-page.js?v=20261113-fomofill"></script>
 </body>
 </html>

@@ -64,16 +64,29 @@ function acctTotal(acct) {
   return Number.isFinite(n) ? n : null;
 }
 
-function strengthExportRemark(pf, pnl30, plat = null, gmgnOk = true, acct = null) {
+const FOMO_PERIOD_NAME = { all: "全部", "30d": "30 天", "7d": "7 天", "24h": "24 小时" };
+const FOMO_PERIOD_SHORT = [["30d", "30天"], ["7d", "7天"], ["24h", "24h"]];
+function fomoBoardPnl(w, period) {
+  const e = w && w.fomo ? w.fomo[period] : null;
+  const n = e && e.pnl != null ? Number(e.pnl) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function strengthExportRemark(pf, pnl30, plat = null, gmgnOk = true, acct = null, fomo = null) {
   const parts = [];
   const platBest = plat && plat.n > 0 ? plat.best : null;
-  if (acctTotal(acct) != null) {
-    parts.push(`pump总${exportMoney(acctTotal(acct))}`);
+  const fomoAll = fomoBoardPnl({ fomo }, "all");
+  const fomoPeriod = fomoAll == null ? FOMO_PERIOD_SHORT.find(([p]) => fomoBoardPnl({ fomo }, p) != null) : null;
+  if (acctTotal(acct) != null || fomoAll != null) {
+    parts.push(acctTotal(acct) != null ? `pump总${exportMoney(acctTotal(acct))}` : `FOMO总${exportMoney(fomoAll)}`);
     if (platBest && Number(platBest.pnl) > 0) parts.push(`最赚${platBest.symbol}${exportMoney(platBest.pnl)}`);
-  } else if (platBest && plat.n === 1) parts.push(`平台盈亏${platBest.symbol}${exportMoney(platBest.pnl)}`);
-  else if (platBest) {
-    parts.push(`平台盈亏${exportMoney(plat.sum)}(${plat.n}颗)`);
-    if (Number(platBest.pnl) > 0) parts.push(`最赚${platBest.symbol}${exportMoney(platBest.pnl)}`);
+  } else {
+    if (fomoPeriod) parts.push(`FOMO${fomoPeriod[1]}${exportMoney(fomoBoardPnl({ fomo }, fomoPeriod[0]))}`);
+    if (platBest && plat.n === 1) parts.push(`平台盈亏${platBest.symbol}${exportMoney(platBest.pnl)}`);
+    else if (platBest) {
+      parts.push(`平台盈亏${exportMoney(plat.sum)}(${plat.n}颗)`);
+      if (Number(platBest.pnl) > 0) parts.push(`最赚${platBest.symbol}${exportMoney(platBest.pnl)}`);
+    }
   }
   if (gmgnOk !== false && pf && !pf.note) {
     if (pf.total != null) parts.push(`GMGN总${exportMoney(pf.total)}`);
@@ -108,30 +121,47 @@ function walletExportRemark(labels, manual, platformRows, groupOf, labelName = {
   const custom = (labels || []).filter((id) => !groupOf[id] && (manual || []).includes(id));
   const grade = stats.card && stats.card.grade ? `${stats.card.grade}级` : "";
   const platName = platformExportRemark(platformRows);
-  const strength = strengthExportRemark(stats.pf, stats.pnl30, stats.plat, gmgnOk, pumpAcct);
+  const strength = strengthExportRemark(stats.pf, stats.pnl30, stats.plat, gmgnOk, pumpAcct, stats.fomo);
   const parts = (platName ? [platName, strength, grade, ...tagged, ...custom] : [grade, ...tagged, ...custom, strength]).filter(Boolean);
   return exportClean([...new Set(parts)].join("/"));
 }
 
 const pumpAcctOf = (w) => (w && w.acct ? w.acct["pump.fun"] : null);
-function platformProfit(w) {
+function platformProfit(w, mode = "") {
   const acct = acctTotal(pumpAcctOf(w));
   if (acct != null) return { value: acct, src: "pump.fun 帐号", n: pumpAcctOf(w).coins, acct: true };
+  const all = fomoBoardPnl(w, "all");
+  if (all != null) return { value: all, src: "FOMO 全部榜", fomo: "all" };
   const sum = w && w.plat && w.plat.n > 0 ? Number(w.plat.sum) : NaN;
-  return Number.isFinite(sum) ? { value: sum, src: "平台", n: w.plat.n } : null;
+  if (Number.isFinite(sum)) return { value: sum, src: "平台", n: w.plat.n };
+  for (const [period] of FOMO_PERIOD_SHORT) {
+    const v = fomoBoardPnl(w, period);
+    if (v != null) return { value: v, src: `FOMO ${FOMO_PERIOD_NAME[period]}榜`, fomo: period };
+  }
+  const gm = mode === "gmgn" && w && w.chain === "Solana" && w.gmgnOk && w.gm && w.gm.total != null ? Number(w.gm.total) : NaN;
+  return Number.isFinite(gm) ? { value: gm, src: "GMGN 补", gmgn: true } : null;
 }
 
-function platformProfitStats(wallets, names, chain, platforms = []) {
+function platformProfitStats(wallets, names, chain, platforms = [], mode = "") {
   const any = !platforms.length || platforms.includes("*");
   const addresses = new Set((names || []).filter((p) => p.chain === chain && p.address && p.handle && (any || platforms.includes(p.platform))).map((p) => p.address));
   const byAddress = new Map((wallets || []).filter((w) => w.chain === chain).map((w) => [w.address, w]));
-  const stats = { total: addresses.size, loss: 0, small: 0, unknown: 0, tiers: Object.fromEntries(EXPORT_PLAT_TIERS.map((t) => [t, 0])) };
+  const stats = { total: addresses.size, loss: 0, small: 0, unknown: 0, fomoAll: 0, fomoPeriod: 0, gmgn: 0, gmgnCan: 0,
+    tiers: Object.fromEntries(EXPORT_PLAT_TIERS.map((t) => [t, 0])) };
   const pumpAddresses = new Set((names || []).filter((p) => p.chain === chain && p.address && p.handle && p.platform === "pump.fun").map((p) => p.address));
   stats.pump = { total: pumpAddresses.size, synced: [...pumpAddresses].filter((a) => acctTotal(pumpAcctOf(byAddress.get(a))) != null).length };
   for (const address of addresses) {
-    const profit = platformProfit(byAddress.get(address));
+    const w = byAddress.get(address);
+    const profit = platformProfit(w, mode);
     stats.tiers[0] += 1;
-    if (!profit) { stats.unknown += 1; continue; }
+    if (!profit) {
+      stats.unknown += 1;
+      if (platformProfit(w, "gmgn")) stats.gmgnCan += 1;
+      continue;
+    }
+    if (profit.fomo === "all") stats.fomoAll += 1;
+    else if (profit.fomo) stats.fomoPeriod += 1;
+    else if (profit.gmgn) stats.gmgn += 1;
     if (profit.value < 0) stats.loss += 1;
     else if (profit.value < 1000) stats.small += 1;
     for (const t of EXPORT_PLAT_TIERS) if (t && profit.value >= t) stats.tiers[t] += 1;
@@ -154,7 +184,7 @@ function exportSelection(sel) {
   }
   const since = Number(sel && sel.since);
   return { picks: new Set((sel && sel.picks) || []), drops: new Set((sel && sel.drops) || []), platMin: exportPlatMin(sel && sel.platMin),
-    platUnknown: Boolean(sel && sel.platUnknown), since: EXPORT_SINCE_DAYS.includes(since) ? since : 0, now };
+    platUnknown: sel && sel.platUnknown === "gmgn" ? "gmgn" : Boolean(sel && sel.platUnknown), since: EXPORT_SINCE_DAYS.includes(since) ? since : 0, now };
 }
 
 function exportDefaultSelection(groupOf = {}) {
@@ -234,8 +264,8 @@ function libraryExportPick(wallets, names, chain, sel, groupOf = {}, highFreq = 
   const profitOk = (w, name) => {
     const min = platMin[name] || 0;
     if (!min) return true;
-    const profit = platformProfit(w);
-    return profit ? profit.value >= min : platUnknown;
+    const profit = platformProfit(w, platUnknown === "gmgn" ? "gmgn" : "");
+    return profit ? profit.value >= min : platUnknown === true;
   };
   const viaPlatform = (w, rows) => Boolean(rows) && rows.some((p) => picked(p.platform) && profitOk(w, p.platform));
   const fresh = (ts) => !since || (Number(ts) > 0 && now - Number(ts) <= since * 86400);
@@ -371,6 +401,7 @@ if (typeof module === "object" && module.exports) {
   module.exports = { EXPORT_LABEL_SHORT, EXPORT_SKIP, EXPORT_DROPS, EXPORT_DEFAULT_DROPS, exportMoney, platformExportRemark, strengthExportRemark,
     walletExportRemark, libraryExportItems, libraryExportText, libraryExportCounts, platformExportText, platformExportCounts, botExportNote,
     exportSelection, exportDefaultSelection, exportPickHit, exportDropHit, EXPORT_PLAT_TIERS, platformProfit, platformProfitStats, acctTotal,
+    fomoBoardPnl, FOMO_PERIOD_NAME,
     EXPORT_PLATFORMS, EXPORT_SINCE_DAYS, exportPlatMin, exportExpandPicks, exportExpandDrops, exportDropRows, exportPnlTier, exportWinrate, exportUsd, exportTierText, libraryExportPick,
     pumpSyncProgressText, bulkDuration, gmRefreshEstimate, gmRefreshText, cleanupSummary, cleanupChains, cleanupDetail, cleanupAppliedText, BULK_SRC };
 }
@@ -431,6 +462,32 @@ if (typeof document !== "undefined") {
     const read = (key) => { try { return localStorage.getItem(key); } catch { return null; } };
     const write = (key, value) => { try { localStorage.setItem(key, value); } catch {  } };
     const zeroMin = () => exportPlatMin(0);
+    const libBridge = (() => {
+      const waiting = new Map();
+      let info = null;
+      window.addEventListener("message", (e) => {
+        if (e.source !== window || e.origin !== location.origin) return;
+        const m = e.data;
+        if (!m || m.from !== "wl-ext") return;
+        if (m.type === "wi-ext-ready") { info = m; return; }
+        if (m.type === "wi-ext-fomo-board-result" && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+      });
+      window.postMessage({ type: "wi-ext-hello" }, location.origin);
+      return {
+        has: (feature) => Boolean(info && (info.features || []).includes(feature)),
+        get version() { return info ? info.version : ""; },
+        fomoBoard() {
+          const id = `fb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          return new Promise((resolve) => {
+            const late = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "插件 2 分钟没回应" }); }, 120000);
+            waiting.set(id, (m) => { clearTimeout(late); resolve(m); });
+            window.postMessage({ type: "wi-ext-fomo-board", id }, location.origin);
+          });
+        },
+      };
+    })();
+    const board = { busy: false, msg: "" };
+    const profitMode = () => (state.platUnknown === "gmgn" ? "gmgn" : "");
     const state = { wallets: [], names: [], groupOf: {}, labelName: {}, highFreq: EXPORT_HIGH_FREQ, output: { count: 0, text: "" }, now: Date.now() / 1000,
       picks: null, drops: null, platMin: zeroMin(), platUnknown: false, since: 0, seen: new Set(),
       chain: read("wi-platform-export-chain") || "", format: read("wi-platform-export-format") === "gmgn" ? "gmgn" : "debot" };
@@ -516,14 +573,26 @@ if (typeof document !== "undefined") {
     function platformTierGroups() {
       const picked = [...state.picks].filter((key) => key.startsWith("plat:")).map((key) => key.slice(5));
       const boxes = EXPORT_PLATFORMS.map((name) => {
-        const stats = platformProfitStats(state.wallets, state.names, state.chain, [name]);
+        const stats = platformProfitStats(state.wallets, state.names, state.chain, [name], profitMode());
         const box = groupBox({ title: `${name} 用户总盈利`, note: "只把赚到这么多的当平台用户导出", label: `${name} 用户总盈利门槛`,
           chips: EXPORT_PLAT_TIERS.map((t) => chip(`${name}|${t}`, "platMin", exportTierText(t), state.platMin[name] === t, stats.tiers[t])) });
         const note = document.createElement("p");
         note.className = "sheet-note";
+        const filled = [stats.fomoAll && `FOMO 全部榜 ${stats.fomoAll} 个`, stats.fomoPeriod && `FOMO 30 天／7 天／24 小时榜 ${stats.fomoPeriod} 个`,
+          stats.gmgn && `GMGN ${stats.gmgn} 个`].filter(Boolean);
         note.textContent = `${state.chain} 的 ${name} 用户 ${stats.total} 个：亏损 ${stats.loss}、赚 $0～$1K ${stats.small}、赚 $1K 以上 ${stats.tiers[1000]}、盈利不明 ${stats.unknown}。`
+          + (filled.length ? `盈利是补上的：${filled.join("、")}。` : "")
           + (picked.includes(name) || picked.includes("*") ? "" : `现在没勾「${name} 用户」，这排不影响导出。`);
         box.append(note);
+        if (name === "FOMO") {
+          const line = document.createElement("p");
+          line.className = "sheet-note";
+          const btn = Object.assign(document.createElement("button"), { type: "button", className: "btn btn-sm", textContent: board.busy ? "读取中…" : "从 FOMO 排行榜补盈利" });
+          btn.dataset.fomoBoard = "1";
+          btn.disabled = board.busy;
+          line.append(btn, " ", board.msg || "用插件读 FOMO 排行榜（24 小时／7 天／30 天／全部）上每个人 FOMO 自己算的盈利，顺便绑新名字；Chrome 要登录 FOMO。");
+          box.append(line);
+        }
         if (name === "pump.fun" && stats.pump.total) {
           const sync = document.createElement("p");
           sync.className = "sheet-note";
@@ -535,11 +604,13 @@ if (typeof document !== "undefined") {
       });
       const all = platformProfitStats(state.wallets, state.names, state.chain, picked);
       const unknown = groupBox({ title: "盈利不明的平台用户", note: "有设门槛才有差", label: "盈利不明的平台用户",
-        chips: [chip("0", "platUnknown", "当没达到", !state.platUnknown), chip("1", "platUnknown", "当达到", state.platUnknown, all.unknown)] });
+        chips: [chip("0", "platUnknown", "当没达到", state.platUnknown === false), chip("gmgn", "platUnknown", "Solana 用 GMGN 补", state.platUnknown === "gmgn", all.gmgnCan),
+          chip("1", "platUnknown", "当达到", state.platUnknown === true, all.unknown)] });
       const note = document.createElement("p");
       note.className = "sheet-note";
-      note.textContent = "总盈利只用平台自己算的、不看 GMGN：pump.fun 用户先用 pump.fun 帐号总盈亏（每颗交易过的币加总），还没算的和 FOMO 用户用钱包库里有平台数字的几颗币加总；"
-        + "都没有的算盈利不明（FOMO 不给帐号总盈亏，钱包库里没有他交易过的币就算不出来）。没达到门槛的平台用户不会因为是平台用户就导出，符合其他勾选的照常导出。";
+      note.textContent = "总盈利照这个顺序拿平台自己算的：pump.fun 帐号总盈亏（每颗交易过的币加总）→ FOMO 排行榜「全部」榜的盈利（FOMO 算的总盈利）→ 钱包库里有平台数字的几颗币加总"
+        + " → FOMO 30 天／7 天／24 小时榜的盈利（只是那段时间的）；都没有的算盈利不明。「Solana 用 GMGN 补」只补 Solana、GMGN 看得到他买卖的"
+        + "（BSC／Robinhood 的 GMGN 数字常常不准，不补），备注照样只写平台自己算的。没达到门槛的平台用户不会因为是平台用户就导出，符合其他勾选的照常导出。";
       unknown.append(note);
       return [...boxes, unknown];
     }
@@ -638,6 +709,44 @@ if (typeof document !== "undefined") {
       render();
     }
 
+    async function fomoBoardFill() {
+      if (board.busy) return;
+      if (!libBridge.has("fomo-board")) {
+        board.msg = libBridge.version ? `插件是 ${libBridge.version}，要 1.3.21 以上才有这个：插件会自己更新，等半分钟刷新这页再按。`
+          : "要先装好钱包库插件（Chrome 扩充功能），装好刷新这页再按。";
+        render();
+        return;
+      }
+      board.busy = true;
+      board.msg = "插件正在读 FOMO 排行榜（四个榜，约 10 秒）…";
+      render();
+      try {
+        const r = await libBridge.fomoBoard();
+        if (!r || !r.ok || !r.board) throw new Error((r && r.error) || "读 FOMO 排行榜失败");
+        const periods = Object.entries(r.board.periods || {}).map(([p, n]) => `${FOMO_PERIOD_NAME[p] || p} ${n} 位`).join("、");
+        const head = `读到 FOMO 排行榜 ${periods}，共 ${r.board.users.length} 人${r.why ? `（${r.why}，后面的榜没读）` : ""}`;
+        board.msg = `${head}，存进钱包库中…`;
+        render();
+        const res = await libraryPost("/api/fomo/board-import", { board: r.board });
+        let job = res.job || {};
+        const saved = job.pnlSaved || 0;
+        board.msg = `${head}；存了 ${saved} 笔 FOMO 盈利，正在绑新名字（Solana 链上反查、BSC／Robinhood 问 GMGN，会跑几分钟）…`;
+        await load();
+        for (let i = 0; i < 400 && job.running; i += 1) {
+          await new Promise((ok) => setTimeout(ok, 3000));
+          job = (await libraryPost("/api/fomo/board-status", {})).job || {};
+        }
+        board.msg = `${head}；存了 ${saved} 笔 FOMO 盈利，绑到 ${job.bound || 0} 个地址（新绑 ${job.added || 0}、新加进钱包库 ${job.libAdded || 0}）`
+          + `${job.error ? `；绑定出错：${job.error}` : ""}。`;
+        await load();
+      } catch (error) {
+        board.msg = `没补到：${error.message || error}`;
+      } finally {
+        board.busy = false;
+        render();
+      }
+    }
+
     byId("open-platform-export")?.addEventListener("click", () => { if (!dialog.open) dialog.showModal(); load(); });
     byId("platform-export-close")?.addEventListener("click", () => dialog.close());
     dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
@@ -646,6 +755,7 @@ if (typeof document !== "undefined") {
       const button = event.target.closest("button[data-pick]");
       const tier = event.target.closest("button[data-plat-min]");
       const unknown = event.target.closest("button[data-plat-unknown]");
+      if (event.target.closest("button[data-fomo-board]")) { fomoBoardFill(); return; }
       if (all) {
         const keys = all.dataset.pickAll.split(",");
         const on = !keys.every((key) => state.picks.has(key));
@@ -657,7 +767,8 @@ if (typeof document !== "undefined") {
         const [name, t] = tier.dataset.platMin.split("|");
         state.platMin = { ...state.platMin, [name]: Number(t) || 0 };
       } else if (unknown) {
-        state.platUnknown = unknown.dataset.platUnknown === "1";
+        const v = unknown.dataset.platUnknown;
+        state.platUnknown = v === "1" ? true : v === "gmgn" ? "gmgn" : false;
       } else return;
       saveSelection();
       render();

@@ -338,6 +338,97 @@ async function fomoGrabBg(msg) {
   }
 }
 
+async function fomoBoardInPage() {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const token = () => {
+    try {
+      let t = JSON.parse(localStorage.getItem("privy:token") || "null");
+      for (let i = 0; !t && i < localStorage.length; i += 1) {
+        const k = localStorage.key(i);
+        if (/^privy:[^:]+:token$/.test(k || "")) t = JSON.parse(localStorage.getItem(k) || "null");
+      }
+      return t;
+    } catch (_) { return null; }
+  };
+  const want = { "24h": /^pnl_?24h$/i, "7d": /^pnl_?7d$/i, "30d": /^pnl_?30d$/i, all: /^pnl_?(all|alltime|total)$/i };
+  const users = new Map(), periods = {}, skipped = [], pnlKeys = {};
+  let why = "";
+  const P = ["24h", "7d", "30d", "all"];
+  for (let i = 0; i < P.length; i += 1) {
+    const p = P[i];
+    if (i) await sleep(1200);
+    let r = null;
+    for (let k = 0; k < 3; k += 1) {
+      if (k) await sleep(2500);
+      const t = token();
+      if (!t) { r = { status: 401 }; continue; }
+      try {
+        r = await fetch(`https://prod-api.fomo.family/v2/leaderboard/${p}?tradeType=spot`, {
+          headers: { Accept: "application/json", "X-Supported-Chains": "1,56,143,4663,5042,8453,1399811149", Authorization: "Bearer " + t } });
+      } catch (_) { r = null; continue; }
+      if (r.status !== 401) break;
+    }
+    if (!r) { skipped.push(`${p} 连不上`); continue; }
+    if (r.status === 401) { if (!users.size) return { ok: false, login: true }; why = "FOMO 登录过期"; break; }
+    if (r.status === 403) { if (!users.size) return { ok: false, refused: true }; why = "FOMO 拒绝（HTTP 403）"; break; }
+    if (r.status === 429) { why = "FOMO 叫我们慢一点（HTTP 429）"; break; }
+    if (!r.ok) { skipped.push(`${p} HTTP ${r.status}`); continue; }
+    let j;
+    try { j = await r.json(); } catch (_) { skipped.push(`${p} 回的不是 JSON`); continue; }
+    const list = j && j.responseObject && Array.isArray(j.responseObject.leaderboard) ? j.responseObject.leaderboard : null;
+    if (!list) { skipped.push(`${p} 没有名单`); continue; }
+    periods[p] = list.length;
+    list.forEach((x, idx) => {
+      const hd = x && typeof x.userHandle === "string" ? x.userHandle.trim().slice(0, 40) : "";
+      if (!hd) return;
+      const key = hd.toLowerCase();
+      const tw = x.twitter && typeof x.twitter === "object" ? x.twitter.username || x.twitter.handle || x.twitter.screenName || "" : "";
+      const u = users.get(key) || { h: hd, n: String(x.displayName || "").slice(0, 40), f: Number(x.followers) || 0, v: !!x.verified, x: String(tw).slice(0, 20),
+        ranks: {}, pnl: {}, pk: {}, hold: [] };
+      u.ranks[p] = idx + 1;
+      const keys = Object.keys(x).filter((kk) => /^pnl/i.test(kk) && typeof x[kk] === "number");
+      if (!idx) pnlKeys[p] = Object.keys(x).filter((kk) => /pnl|profit/i.test(kk)).slice(0, 12);
+      const pk = keys.find((kk) => want[p].test(kk)) || keys.find((kk) => /^pnl_?(usd|value)?$/i.test(kk));
+      if (pk) { u.pnl[p] = Math.round(x[pk]); u.pk[p] = pk; }
+      if (!u.hold.length && Array.isArray(x.topHoldings)) {
+        u.hold = x.topHoldings.slice(0, 5).filter((t) => t && typeof t.tokenAddress === "string" && typeof t.humanAmount === "number" && t.humanAmount > 0)
+          .map((t) => [t.tokenAddress.slice(0, 64), Number(t.networkId) || 0, t.humanAmount]);
+      }
+      users.set(key, u);
+    });
+  }
+  if (!users.size) return { ok: false, error: `没读到 FOMO 排行榜${[why, ...skipped].filter(Boolean).length ? `（${[why, ...skipped].filter(Boolean).join("、")}）` : ""}` };
+  return { ok: true, why: [why, ...skipped].filter(Boolean).join("、"),
+    board: { kind: "fomo-board", v: 2, at: Date.now(), tradeType: "spot", periods, pnlKeys, users: [...users.values()] } };
+}
+async function fomoBoardBg() {
+  const tabs = await chrome.tabs.query({ url: FOMO_TABS }).catch(() => []);
+  let tab = tabs.find((t) => t.status === "complete") || tabs[0] || null;
+  let opened = false;
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: "https://fomo.family/", active: false });
+    opened = true;
+  }
+  try {
+    await waitTabLoaded(tab.id, 30000, /^https:\/\/(www\.)?fomo\.family\//, "FOMO");
+    if (opened) await new Promise((r) => setTimeout(r, 2500));
+    const [res] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: fomoBoardInPage });
+    const r = res && res.result;
+    if (!r) throw new Error("FOMO 页没回应");
+    if (r.login || r.refused) {
+      opened = false;
+      await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
+      await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+      return { ok: false, login: Boolean(r.login), refused: Boolean(r.refused),
+        error: r.login ? "FOMO 没登录（或登录过期）：已切到 FOMO 页，登录后回来再按一次" : "FOMO 拒绝这次读取（HTTP 403）：已切到 FOMO 页，确认有登录、过完验证再按一次" };
+    }
+    if (!r.ok) return { ok: false, error: r.error || "读 FOMO 排行榜失败" };
+    return { ok: true, board: r.board, why: r.why || "", borrowed: !opened };
+  } finally {
+    if (opened) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
 const PUMP_HOT_ALARM = "wl-pump-hot";
 function ensurePumpAlarm() {
   chrome.alarms.get(PUMP_HOT_ALARM).then((a) => { if (!a) chrome.alarms.create(PUMP_HOT_ALARM, { periodInMinutes: 0.5 }); }).catch(() => {});
@@ -445,6 +536,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       case "wl-plat-match": return platMatch(msg);
       case "wl-pump-grab": return pumpGrab(msg);
       case "wl-fomo-grab": return fomoGrabBg(msg);
+      case "wl-fomo-board": return fomoBoardBg();
       default:
         return { ok: false, error: "不认得的消息" };
     }
