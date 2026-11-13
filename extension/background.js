@@ -24,6 +24,9 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.contextMenus.create({ id: MENU_ID, title: "在钱包库查这个地址", contexts: ["selection", "link"] }, () => void chrome.runtime.lastError);
   });
   chrome.tabs.query({ url: SITE_TABS }).then((tabs) => { for (const t of tabs) inject(t.id).catch(() => {}); }).catch(() => {});
+  chrome.tabs.query({ url: LOCAL_TABS }).then((tabs) => {
+    for (const t of tabs) chrome.scripting.executeScript({ target: { tabId: t.id }, files: ["content/bridge.js"] }).catch(() => {});
+  }).catch(() => {});
 });
 
 const CONTENT_FILES = ["lib/ca.js", "content/badges.js", "content/float.js"];
@@ -162,6 +165,7 @@ async function saveSiteNames(msg) {
   if (sentNames.size > 20000) for (const k of [...sentNames.keys()].slice(0, 5000)) sentNames.delete(k);
 }
 
+const LOCAL_TABS = ["http://127.0.0.1/*", "http://localhost/*"];
 const SITE_TABS = ["https://gmgn.ai/*", "https://www.gmgn.ai/*", "https://debot.ai/*", "https://www.debot.ai/*", "https://ave.ai/*", "https://www.ave.ai/*"];
 async function mark(msg) {
   const address = WLCA.norm(msg.address);
@@ -324,7 +328,20 @@ async function pumpHotTick() {
     pumpHotBusy = false;
   }
 }
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === PUMP_HOT_ALARM) pumpHotTick(); });
+chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === PUMP_HOT_ALARM) { pumpHotTick(); selfUpdateBg(); } });
+
+async function selfUpdateBg() {
+  try {
+    if (pumpHotBusy) return;
+    const running = chrome.runtime.getManifest().version;
+    const disk = (await (await fetch(chrome.runtime.getURL("manifest.json"), { cache: "no-store" })).json()).version;
+    if (!disk || disk === running) return;
+    const { selfReload } = await chrome.storage.local.get({ selfReload: null });
+    if (selfReload && selfReload.v === disk && Date.now() - selfReload.at < 10 * 60 * 1000) return;
+    await chrome.storage.local.set({ selfReload: { v: disk, from: running, at: Date.now(), by: "bg" } });
+    chrome.runtime.reload();
+  } catch (_) {  }
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   const run = async () => {

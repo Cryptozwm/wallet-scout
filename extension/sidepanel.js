@@ -586,6 +586,7 @@ function detailHtml(w, r, wallet = false) {
       <span class="muted">第一笔 ${esc(when(w.trade.first))}</span><span class="muted">最后 ${esc(when(w.trade.last))}</span></div></div>`);
   }
   if (w.bot) parts.push(`<div><div class="k">机器人</div><div class="note">${esc(w.bot)}</div></div>`);
+  if (w.hft) parts.push(`<div><div class="k">高频交易</div><div class="note">${esc(w.hft)}（不算要避开）</div></div>`);
   if (w.note) parts.push(`<div><div class="k">备注</div><div class="note">${esc(w.note)}</div></div>`);
   parts.push(WLCA.editHtml(w, w.address));
   parts.push(actsHtml(w.address, w.chain, wallet));

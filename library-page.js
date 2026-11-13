@@ -8,11 +8,11 @@ const EXPORT_LABEL_SHORT = [
   ["pnl_1m", "赚1M+"], ["pnl_500k", "赚500K+"], ["pnl_200k", "赚200K+"], ["pnl_100k", "赚100K+"], ["pnl_50k", "赚50K+"], ["pnl_30k", "赚30K+"], ["pnl_10k", "赚10K+"], ["pnl_5k", "赚5K+"], ["pnl_3k", "赚3K+"],
   ["gold_regular", "金狗常客"], ["fresh_gold", "新钱包金狗"], ["top_seller", "卖在高点"], ["diamond", "钻石手"], ["paper_gold", "金狗卖飞"],
   ["smart_money", "聪明钱"], ["gmgn_smart", "GMGN聪明钱"], ["long_pnl", "30天赚"], ["early_profit", "早期高盈利"],
-  ["long_hold_big", "长抱大赚"],
+  ["long_hold_big", "长抱大赚"], ["hft", "高频"],
 ];
 const EXPORT_MAX_LABELS = 4;
 const EXPORT_DROPS = [
-  ["bot", "机器人"], ["pending", "还没查交易频率"], ["quiet", "低盈利"], ["highfreq", "高频（30 天买卖次数多）"],
+  ["bot", "机器人／高频交易"], ["pending", "还没查交易频率"], ["quiet", "低盈利"], ["highfreq", "高频（30 天买卖次数多）"],
   ["bundle", "捆绑（同源资金）"], ["insider", "疑似庄家／内部"], ["sniper", "狙击手"], ["loss30", "30 天亏损"], ["dormant", "休眠（7 天没交易）"],
 ];
 const EXPORT_DEFAULT_DROPS = ["bot", "pending", "quiet"];
@@ -199,7 +199,7 @@ function botExportNote(wallets, chain) {
   const rows = (wallets || []).filter((w) => w.chain === chain && !(w.platforms || []).length);
   const bots = rows.filter((w) => w.bot).length, pending = rows.filter((w) => !w.bot && w.botPending).length;
   const parts = [];
-  if (bots) parts.push(`${bots} 个机器人（你标过所以还在库里）不导出`);
+  if (bots) parts.push(`${bots} 个机器人／高频交易（你标过所以还在库里）不导出`);
   if (pending) parts.push(`${pending} 个还在查交易频率，查完确定不是机器人才会导出（每 30 分钟查一批）`);
   return parts.length ? `${parts.join("；")}。` : "";
 }

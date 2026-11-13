@@ -49,6 +49,7 @@ BOT_TAGS = {"sandwich_bot", "wash_trader", "arbitrager"}
 INSIDER_TAGS = {"creator", "dev_team", "insider", "rat_trader"}
 BOT_TRADES_30D = cfg('BOT_TRADES_30D', 5000)
 BOT_TOKENS_30D = cfg('BOT_TOKENS_30D', 1500)
+BOT_STRONG_TRADES_30D = 15_000
 BOT_CHECK_PER_ROUND = 60
 BOT_MAX_TRIES = 3
 BOT_RULE = (f"GMGN 30 天买卖 ≥{BOT_TRADES_30D:,} 笔、"
@@ -56,6 +57,9 @@ BOT_RULE = (f"GMGN 30 天买卖 ≥{BOT_TRADES_30D:,} 笔、"
             f"FOMO／pump.fun 用户一定留、一定导出（就算交易很频繁，标签会写机器人）；"
             f"你标过的（手动标签、备注、私人标签、确认相关、聪明钱追踪中）留着但标成机器人、不导出；你把机器人标签移掉的就不当机器人。"
             f"BSC／Robinhood 同一个 0x 地址任一边是机器人就整个算")
+BOT_TIER_RULE = (f"分两级：买进后不到 5 秒就卖（秒卖，聪明钱动态算的）或 30 天买卖 ≥{BOT_STRONG_TRADES_30D:,} 笔（约每 3 分钟一笔、24 小时不停）标「机器人」（要避开）；"
+                 f"其他 30 天买卖 ≥{BOT_TRADES_30D:,} 笔或交易 ≥{BOT_TOKENS_30D:,} 颗币的标「高频交易」（参考，常是用交易终端、自动止盈的真人）。"
+                 f"进不进钱包库、汇不导出两种一样：")
 GOLD_RULE =(f"「早买金狗」＝币创建后 {EARLY_SECONDS // 60} 分钟内开始持有，这颗币历史最高价 ≥ 他平均买价 {GOLD_X} 倍、"
              f"最高市值 ≥ ${GOLD_MC_USD:,}，而且 GMGN 没标开发者（creator／dev_team）或机器人（sandwich_bot／wash_trader／arbitrager）")
 
@@ -86,7 +90,8 @@ RULES: list[dict[str, str]] = [
     {"id": "insider", "group": "avoid", "label": "疑似庄家/内部", "rule": "GMGN 该币标签含 creator / dev_team / insider / rat_trader，或开盘后 60 秒内进场且持仓 ≥ 5%"},
     {"id": "bundle_member", "group": "avoid", "label": "捆绑成员（同源资金）", "rule": "在某 CA 中，与至少 1 个其他早期地址由同一个非交易所地址提供主币／USD 稳定币"},
     {"id": "sniper", "group": "avoid", "label": "狙击手", "rule": "GMGN 标 sniper（开池后最早几个区块买入；还没卖就是卖压）"},
-    {"id": "bot", "group": "avoid", "label": "机器人", "rule": BOT_RULE},
+    {"id": "bot", "group": "avoid", "label": "机器人", "rule": BOT_TIER_RULE + BOT_RULE},
+    {"id": "hft", "group": "ref", "label": "高频交易", "rule": BOT_TIER_RULE + BOT_RULE},
     {"id": "kol", "group": "ref", "label": "KOL", "rule": "GMGN 回传 twitter_username，或 GMGN 标签含 kol / renowned"},
     {"id": "fomo_user", "group": "ref", "label": "FOMO 用户", "rule": "某 CA 的 GMGN 前 100 持仓中，持有数量与 FOMO 帐号相差 ≤1 颗，且只对上这一个地址"},
     {"id": "pump_user", "group": "ref", "label": "pump.fun 用户", "rule": "某 CA 的 GMGN 前 100 持仓中，持有数量与 pump.fun 帐号相差 ≤1 颗，且只对上这一个地址"},
@@ -366,6 +371,23 @@ def bot_reason(tags: Any, trades: Any, tokens: Any) -> str:
     return ""
 
 
+def bot_tier(reason: str, flip: bool = False) -> str:
+    if flip or "秒卖" in str(reason or ""):
+        return "bot"
+    if not reason:
+        return ""
+    m = re.search(r"买卖 ([\d,]+) 笔", str(reason))
+    return "bot" if m and int(m.group(1).replace(",", "")) >= BOT_STRONG_TRADES_30D else "hft"
+
+
+def flip_wallets(conn: sqlite3.Connection) -> set[str]:
+    try:
+        import smart_money
+        return {norm(SM_CHAIN.get(c, "BSC"), a) for c, a in smart_money._fast_flip_set(conn)}
+    except Exception:
+        return set()
+
+
 def stats_raw(stats: Any) -> str:
     if not isinstance(stats, dict):
         return ""
@@ -425,7 +447,7 @@ def bot_wallets_now(conn: sqlite3.Connection, sm: dict[tuple[str, str], tuple[in
         key = (r["chain"], r["address"])
         group = norm(*key)
         members.setdefault(group, []).append(key)
-        if "bot" in loads(r["removed_labels"]):
+        if {"bot", "hft"} & set(loads(r["removed_labels"])):
             cleared.add(group)
             continue
         reason = bot_reason((), *wallet_activity(r, sm.get(key)))
@@ -694,7 +716,7 @@ def refresh_follow_records(now: float | None = None, force: bool = False) -> dic
 
 def recompute_labels(conn: sqlite3.Connection, chain: str, address: str, sibling: bool = True) -> list[str]:
     apps = conn.execute("SELECT * FROM appearances WHERE chain=? AND address=?", (chain, address)).fetchall()
-    row = conn.execute("SELECT twitter, gmgn_tags, created_at, pnl30_realized, pf_buys, pnl30_buys, pnl30_sells, pnl30_tokens FROM wallets "
+    row = conn.execute("SELECT twitter, gmgn_tags, created_at, pnl30_realized, pf_buys, pnl30_buys, pnl30_sells, pnl30_tokens, removed_labels FROM wallets "
                        "WHERE chain=? AND address=?", (chain, address)).fetchone()
     pchains = same_wallet_chains(chain)
     platforms = [prow["platform"] for prow in conn.execute(f"SELECT DISTINCT platform FROM platform_names WHERE chain IN ({','.join('?' * len(pchains))}) AND address=?",
@@ -722,8 +744,11 @@ def recompute_labels(conn: sqlite3.Connection, chain: str, address: str, sibling
         labels.add("kol")
     wtags = {str(tag).lower() for tag in loads(row["gmgn_tags"])} if row else set()
     labels |= {TAG_LABELS[tag] for tag in wtags if tag in TAG_LABELS}
-    if row and bot_reason((), *wallet_activity(row, sm_activity(conn, chain, address).get((chain, address)))):
-        labels.add("bot")
+    if row and not ({"bot", "hft"} & set(loads(row["removed_labels"]))):
+        tier = bot_tier(bot_reason((), *wallet_activity(row, sm_activity(conn, chain, address).get((chain, address)))),
+                        norm(chain, address) in flip_wallets(conn))
+        if tier:
+            labels.add(tier)
     for platform in platforms:
         labels.add(PLATFORM_LABEL.get(platform, ""))
     best, _src = wallet_best(conn, chain, address)
@@ -851,7 +876,7 @@ def ingest(payload: dict[str, Any]) -> dict[str, Any]:
                 if not address or address in skipped or norm(chain, address) in marked:
                     continue
                 row = conn.execute("SELECT * FROM wallets WHERE chain=? AND address=?", (chain, address)).fetchone()
-                if row is not None and "bot" in loads(row["removed_labels"]):
+                if row is not None and {"bot", "hft"} & set(loads(row["removed_labels"])):
                     continue
                 reason = ("在机器人名单" if norm(chain, address) in blocked
                           else bot_reason(w.get("gmgnTags"), *wallet_activity(row, sm.get((chain, address)))))
@@ -2681,6 +2706,12 @@ def pump_sync_import(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _tier_pending(conn: sqlite3.Connection) -> list[tuple[str, str, int, int]]:
+    return [(r["chain"], r["address"], r["bot_tries"] or 0, 0) for r in conn.execute(
+        "SELECT chain, address, bot_tries FROM wallets WHERE pnl30_buys IS NULL AND pnl30_tokens>=? AND COALESCE(bot_tries,0)<? "
+        "ORDER BY pnl30_tokens DESC", (BOT_TOKENS_30D, BOT_MAX_TRIES)) if r["chain"] in GMGN_SLUG]
+
+
 def check_bot_stats(fetch: Any, now: float | None = None, limit: int = BOT_CHECK_PER_ROUND, pause: float = 2.0) -> dict[str, Any]:
     now = int(time.time() if now is None else now)
     with LOCK:
@@ -2689,6 +2720,8 @@ def check_bot_stats(fetch: Any, now: float | None = None, limit: int = BOT_CHECK
             quiet = quiet_wallets(conn)
             sm = sm_activity(conn)
             todo = _bot_pending(conn, quiet, sm, bot_wallets_now(conn, sm))
+            seen = {(c, a) for c, a, _, _ in todo}
+            todo += [t for t in _tier_pending(conn) if (t[0], t[1]) not in seen]
         finally:
             conn.close()
     out: dict[str, Any] = {"todo": len(todo), "checked": 0, "bots": 0, "gaveUp": 0, "errors": [], "rateLimited": False}

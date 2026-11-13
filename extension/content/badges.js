@@ -399,7 +399,8 @@
         ${t ? `<div class="row"><span>这颗币买 <b class="num up">${usd(t.buy, false)}</b></span><span>卖 <b class="num dn">${usd(t.sell, false)}</b></span>
         <span class="mu">第一笔 ${time(t.first)}</span></div>` : `<div class="mu">这颗币在聪明钱动态里没有纪录</div>`}</div>` : "";
     const pv = w.private ? `<div class="sec"><div class="k">你的私人标签</div><span class="c pv">${esc(w.private.label)}</span>${w.private.kindText ? ` <span class="mu">${esc(w.private.kindText)}</span>` : ""}</div>` : "";
-    const bot = w.bot ? `<div class="sec"><div class="k">机器人</div><div class="note">${esc(w.bot)}</div></div>` : "";
+    const bot = (w.bot ? `<div class="sec"><div class="k">机器人</div><div class="note">${esc(w.bot)}</div></div>` : "")
+      + (w.hft ? `<div class="sec"><div class="k">高频交易</div><div class="note">${esc(w.hft)}（不算要避开）</div></div>` : "");
     const note = w.note ? `<div class="sec"><div class="k">备注</div><div class="note">${esc(w.note)}</div></div>` : "";
     const use = (w.useText || []).map((u, i) => `<span class="c use ${w.use[i] === "avoid" ? "av" : w.use[i] === "confirm" ? "fo" : ""}">${esc(u)}</span>`).join("");
     return `<div class="card" role="dialog" aria-label="钱包明细">

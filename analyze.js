@@ -462,6 +462,90 @@
     loadPlatform(q);
   }
 
+  const extBridge = (() => {
+    const waiting = new Map();
+    let info = null, onReady = null;
+    window.addEventListener("message", (e) => {
+      if (e.source !== window || e.origin !== location.origin) return;
+      const m = e.data;
+      if (!m || m.from !== "wl-ext") return;
+      if (m.type === "wi-ext-ready") {
+        const first = !info;
+        info = m;
+        if (first && onReady) onReady(m);
+        return;
+      }
+      if (m.type === "wi-ext-pump-result" && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+    });
+    window.postMessage({ type: "wi-ext-hello" }, location.origin);
+    return {
+      get ready() { return Boolean(info && (info.features || []).includes("pump-grab")); },
+      get version() { return info ? info.version : ""; },
+      set onReady(fn) { onReady = fn; },
+      pumpGrab(ca, cutoff) {
+        const id = `pg-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        return new Promise((resolve) => {
+          const late = setTimeout(() => { waiting.delete(id); resolve({ ok: false, error: "插件 3 分钟没回应" }); }, 180000);
+          waiting.set(id, (m) => { clearTimeout(late); resolve(m); });
+          window.postMessage({ type: "wi-ext-pump-grab", id, ca, cutoff }, location.origin);
+        });
+      },
+    };
+  })();
+  const PUMP_BTN = "用插件抓 pump.fun 名字";
+  function pumpSteps(q) {
+    if (pumpHold && sameCa(pumpHold.mint, q.address) && !q.pumpList) {
+      return `<p class="fomo-manual-note">正在透过 pump.fun 页上的「持币」书签读这颗币的持有人，读完会自己比对。</p>`;
+    }
+    if (extBridge.ready) {
+      return `<div class="row-actions"><button type="button" class="btn btn-sm btn-primary" id="pump-grab"${q.pumpBusy ? " disabled" : ""}>${q.pumpBusy ? "插件读取中…" : PUMP_BTN}</button></div>
+        <p class="fomo-manual-note">插件（${esc(extBridge.version)}）会借你 Chrome 开着的 pump.fun 页读这颗币的持有人，没开就在背景开一页、读完自己关掉，大约 5～15 秒；读完自动比对、对上的存进钱包库。pump.fun 要人机验证时会切到那页给你按，不会自己绕过。</p>`;
+    }
+    return `<ol class="fomo-steps">
+        <li><a class="btn btn-sm" href="https://pump.fun/coin/${encodeURIComponent(q.address)}" target="_blank" rel="noopener">打开这颗币的 pump.fun 页</a></li>
+        <li>在那页按书签列的「持币」（跟 FOMO 同一颗）：会自动开查地址页、读完自己比对，不用拷贝粘贴。</li>
+      </ol>
+      <p class="fomo-manual-note">装了钱包库插件 1.3.18 以上，这里会变成一个按钮直接抓、不用去 pump.fun 页。插件还是旧版的话：开一次插件侧栏（Alt+W）让它自己更新，再回来刷新这页。</p>`;
+  }
+  function pumpBlock(q) {
+    const pst = q.pumpStatus || {};
+    if (pst.ok) {
+      const src = pst.source || "";
+      return `<details class="fomo-manual"><summary>pump.fun 已比对（${esc(src)}，抓取 ${esc(pst.fetchedAt || "")}），门槛以上 ${pst.aboveCutoff ?? 0} 人、对上 ${pst.matched ?? 0} 人。<span class="fomo-manual-more">重新抓</span></summary>${pumpSteps(q)}</details>`;
+    }
+    return `<section class="fomo-manual is-open" aria-label="补上 pump.fun 名字"><p class="fomo-manual-title">还没有 pump.fun 名单（pump.fun 不让服务器直接查，要借你的浏览器读）。</p>${pumpSteps(q)}</section>`;
+  }
+  function renderPump(q) {
+    const box = $("pump-wrap");
+    if (!box || platformQ !== q) return;
+    box.innerHTML = pumpBlock(q);
+    $("pump-grab")?.addEventListener("click", () => grabPumpViaExt(q));
+  }
+  async function grabPumpViaExt(q) {
+    if (q.pumpBusy || !extBridge.ready) return;
+    q.pumpBusy = true;
+    renderPump(q);
+    toast("插件在读 pump.fun 持有人…");
+    const r = await extBridge.pumpGrab(q.address, Number(q.pumpCutoff) || 0);
+    q.pumpBusy = false;
+    if (platformQ !== q) return;
+    if (!r || !r.ok) {
+      renderPump(q);
+      toast(r && r.challenge ? "pump.fun 要先过人机验证：插件已切到 pump.fun 页，验证完回来再按一次" : `插件读 pump.fun 失败：${(r && r.error) || "原因不明"}`);
+      return;
+    }
+    q.pumpList = { ca: q.address, at: Number(r.at) || Date.now(), positions: Array.isArray(r.positions) ? r.positions : [], via: "ext" };
+    toast(`收到 ${q.pumpList.positions.length} 笔 pump.fun 持有人，比对中`);
+    loadPlatform(q);
+  }
+  function maybeAutoPump(q) {
+    if (!extBridge.ready || q.pumpList || q.pumpAuto || q.pumpBusy || (pumpHold && sameCa(pumpHold.mint, q.address))) return;
+    if (!q.pumpStatus || q.pumpStatus.ok || q.pumpStatus.skipped || !/pump$/.test(String(q.address || ""))) return;
+    q.pumpAuto = true;
+    grabPumpViaExt(q);
+  }
+  extBridge.onReady = () => { if (platformQ && platformQ.pumpStatus && !platformQ.pumpStatus.skipped) { renderPump(platformQ); maybeAutoPump(platformQ); } };
+
   let platformQ = null;
   function platformChain(q) {
     const c = String(q.chain || "").toLowerCase();
@@ -483,6 +567,7 @@
       const res = await fetch("/api/match/platform-users", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const r = await res.json().catch(() => ({}));
       if (!res.ok || !r.ok) throw new Error(r.error || `HTTP ${res.status}`);
+      if (q.pumpList?.via === "ext" && r.status?.pumpfun?.source === "书签代查") r.status.pumpfun.source = "插件代查";
       if (platformQ !== q && !fomoList) return;
       const prevStored = q.platformStored || null;
       let stored = {}, storedOk = false;
@@ -534,8 +619,8 @@
       card.innerHTML = `<p class="trace-data-note">GMGN 前 100 持有人里，${hits} 个地址有 ${plats} 帐号${libOnly ? `（这次名单对上 ${live} 个；另外 ${libOnly} 个是钱包库原本记着的，标「钱包库记录」）` : ""}。快照 ${esc(r.snapshotLocal)}。</p>
         ${savedBox}
         ${libLine ? `<p class="trace-data-note">${libLine}</p>` : ""}
-        ${hasPump && r.status.pumpfun && !r.status.pumpfun.ok && !pumpHold ? `<p class="trace-data-note">pump.fun 名字：到这颗币的 pump.fun 页按「持币」书签，会自动开查地址页补上（pump.fun 不让服务器直接查）。</p>` : ""}
         ${hasFomo ? fomoManualBlock(q, r.status.fomo, chain, libFomo) : ""}
+        ${hasPump ? `<div id="pump-wrap"></div>` : ""}
         <div class="table-wrap trace-section"><table><thead><tr><th>#</th><th>完整地址</th><th>持有数量</th><th>持有%</th><th>USD</th><th>GMGN 盈亏 总/已实现/未实现</th><th>GMGN 标签</th><th>GMGN 名称</th><th>推特</th><th>平台</th><th>平台帐号</th><th>FOMO 粉丝</th>${hasPump ? "<th>pump.fun X</th>" : ""}<th>链接</th></tr></thead><tbody>${rows}</tbody></table></div>
         <details class="footnote"><summary>比对规则与数据状态</summary>
           <p>门槛＝第 100 名 ${n(r.cutoff)} 颗。规则：${esc(r.rule)}</p>
@@ -543,7 +628,13 @@
           ${unmatched ? `<p>没对上（不标）：<br>${unmatched}</p>` : ""}
         </details>`;
       if (hasFomo) wireFomoManual();
-      if (hasPump && !q.pumpList) fetchPumpHolders(q, Number(r.cutoff) || 0);
+      q.pumpStatus = r.status.pumpfun || null;
+      q.pumpCutoff = Number(r.cutoff) || 0;
+      if (hasPump) {
+        renderPump(q);
+        if (!q.pumpList) fetchPumpHolders(q, Number(r.cutoff) || 0);
+        maybeAutoPump(q);
+      }
     } catch (error) {
       card.innerHTML = `<div class="trace-empty-card"><strong>平台用户比对失败</strong><span>${esc(error.message)}</span></div>`;
     }

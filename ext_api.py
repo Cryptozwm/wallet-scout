@@ -158,6 +158,7 @@ def _describe(conn: sqlite3.Connection, key: str, spec: tuple[str, str, tuple[st
     follows = _memo("follows", 300, lambda: wl.follow_index(conn))
 
     out: dict[str, dict[str, Any]] = {}
+    flips = wl.flip_wallets(conn) if bots else set()
     for a in addrs:
         chains = _family_chains(spec, a)
         row = next((wallets[a][c] for c in chains if c in wallets.get(a, {})), None)
@@ -175,11 +176,16 @@ def _describe(conn: sqlite3.Connection, key: str, spec: tuple[str, str, tuple[st
         if not keep:
             continue
         labels = wl.effective_labels(row) if row else []
-        bot_removed = bool(row and "bot" in wl.loads(row["removed_labels"]))
+        bot_removed = bool(row and {"bot", "hft"} & set(wl.loads(row["removed_labels"])))
         if bot_removed:
             bot = ""
+        hft = ""
+        if bot and wl.bot_tier(bot, a in flips) == "hft":
+            hft, bot = bot, ""
         if bot and "bot" not in labels:
             labels.append("bot")
+        if hft and "hft" not in labels and "bot" not in labels:
+            labels.append("hft")
         lib_chain = row["chain"] if row else (p[0]["chain"] if p else chains[0])
         card = wl.wallet_card(row, labels, cards.get((lib_chain, a)), follows.get((lib_chain, a))) if row else None
         grade = (card or {}).get("grade") or ((sm_row["grade"] or "") if sm_row and sm_row["scored_at"] else "")
@@ -215,6 +221,7 @@ def _describe(conn: sqlite3.Connection, key: str, spec: tuple[str, str, tuple[st
                    "score": sm_row["score"]} if sm_row else None,
             "trade": {k: (round(v, 2) if isinstance(v, float) else v) for k, v in trade.items()} if trade else None,
             "bot": bot,
+            "hft": hft,
             "avoid": avoid,
             "follow": not avoid and (grade in ("S", "A") or any(wl.LABEL_GROUP.get(x) == "follow" for x in labels)),
         }
@@ -621,7 +628,7 @@ def tag(payload: dict[str, Any]) -> dict[str, Any]:
                 if len(manual) >= 20:
                     raise ValueError("这个钱包的手动标签已经 20 个了，先拿掉一些")
                 manual.append(label)
-            if not on and (auto or label == "bot"):
+            if not on and (auto or label in ("bot", "hft")):
                 removed.append(label)
             for r in rows:
                 conn.execute("UPDATE wallets SET manual_labels=?, removed_labels=?, updated_at=? WHERE chain=? AND address=?",

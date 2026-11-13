@@ -2978,7 +2978,7 @@ const LIBRARY_LABEL_NAMES = {
   early_profit: "早期高盈利", smart_money: "聪明钱", long_hold_big: "长抱大赚", kol: "KOL",
   profit_1k: "有赚 $1K+", long_pnl: "长期获利", fresh_gold: "新钱包早买金狗", paper_gold: "早买金狗但卖飞",
   gold_regular: "金狗常客", top_seller: "卖在高点", diamond: "钻石手", gmgn_smart: "GMGN 聪明钱",
-  insider: "疑似庄家/内部", bundle_member: "捆绑成员（同源资金）", gmgn_bundler: "GMGN bundler 标签", sniper: "狙击手", bot: "机器人",
+  insider: "疑似庄家/内部", bundle_member: "捆绑成员（同源资金）", gmgn_bundler: "GMGN bundler 标签", sniper: "狙击手", bot: "机器人", hft: "高频交易",
   fomo_user: "FOMO 用户", pump_user: "pump.fun 用户", whale: "巨鲸", top_holder: "前排大户", bluechip: "蓝筹持有者", transfer_in: "转入",
 };
 const LIBRARY_GROUPS = [
@@ -2987,7 +2987,7 @@ const LIBRARY_GROUPS = [
 const LIBRARY_LABEL_GROUP = {
   gold_regular: "follow", fresh_gold: "follow", top_seller: "follow", diamond: "follow", paper_gold: "follow", smart_money: "follow",
   gmgn_smart: "follow", long_pnl: "follow", early_profit: "follow", long_hold_big: "follow", profit_1k: "follow",
-  insider: "avoid", bundle_member: "avoid", sniper: "avoid", bot: "avoid",
+  insider: "avoid", bundle_member: "avoid", sniper: "avoid", bot: "avoid", hft: "ref",
   kol: "ref", fomo_user: "ref", pump_user: "ref", whale: "ref", top_holder: "ref", bluechip: "ref", transfer_in: "ref",
 };
 for (const tier of ["1M", "500K", "200K", "100K", "50K", "30K", "10K", "5K", "3K"]) {
