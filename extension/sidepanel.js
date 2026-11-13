@@ -271,14 +271,15 @@ function renderPlat() {
   const bm = typeof wiBookmarklet === "function" ? wiBookmarklet(serverUrl(), "hold") : "";
   const bmLink = bm ? `<a class="pbm" data-plat-bm href="${esc(bm)}" draggable="true" title="按住拖到上面的书签列（书签列没出现按 Ctrl+Shift+B）。之后在 FOMO 币页按它，就会拷贝这颗币的持有人名单；在 pump.fun 币页按会开查地址页补 pump.fun 名字">持币</a>` : "";
   const html = `
-    <div class="prow"><span class="pn">FOMO</span>${cnt("FOMO")}${bmLink}
-      <button type="button" class="btn sm" data-plat="fomo-open" title="开这颗币的 FOMO 页，在那页按书签列的「持币」拷贝名单">开 FOMO</button>
+    <div class="prow"><span class="pn">FOMO</span>${cnt("FOMO")}
+      <button type="button" class="btn sm" data-plat="fomo-open" title="开这颗币的 FOMO 页，在那页按书签列的「持币」拷贝名单">开页</button>
       <button type="button" class="btn sm" data-plat="fomo-paste"${st.busy ? " disabled" : ""} title="不用插件抓的话：在 FOMO 页按「持币」书签后，回来按这颗粘贴名单（也可以在面板上直接 Ctrl+V）">粘贴</button>
       <button type="button" class="btn sm pri" data-plat="fomo-grab"${st.busy ? " disabled" : ""} title="用你这个 Chrome 的 FOMO 登录读这颗币的 FOMO 持有人（前 99 位，跟「持币」书签同一个请求），跟前 100 比对（没开 FOMO 页会在背景开一页，读完关掉；没登录会切到 FOMO 页给你登录）">${st.busy === "fomo" ? "抓取中…" : "抓名字"}</button></div>
     ${msg(st.fomo)}
+    ${bmLink && (st.paste || st.bmHint || (st.fomo && st.fomo.bad)) ? `<div class="phint">不用插件抓的话：把 ${bmLink} 拖到书签列，到 FOMO 币页按它，再回来按「粘贴」</div>` : ""}
     ${st.paste ? `<textarea class="ppaste" data-plat="fomo-text" rows="2" spellcheck="false" placeholder="剪贴板读不到：点这格按 Ctrl+V 粘贴 FOMO 名单"></textarea>` : ""}
     <div class="prow"><span class="pn">pump.fun</span>${cnt("pump.fun")}
-      <button type="button" class="btn sm" data-plat="pump-open" title="开这颗币的 pump.fun 页">开 pump.fun</button>
+      <button type="button" class="btn sm" data-plat="pump-open" title="开这颗币的 pump.fun 页">开页</button>
       <button type="button" class="btn sm pri" data-plat="pump-grab"${st.busy ? " disabled" : ""} title="用你浏览器里的 pump.fun 页读这颗币的 pump.fun 持有人，跟前 100 比对（没开 pump.fun 页会在背景开一页，读完关掉）">${st.busy === "pump" ? "抓取中…" : "抓名字"}</button></div>
     ${msg(st.pump)}`;
   if (box.dataset.html !== html) {
@@ -294,7 +295,8 @@ async function platOpen(kind) {
   const url = kind === "fomo" ? `https://fomo.family/tokens/${c.fomo}/${encodeURIComponent(p.ca)}` : `https://pump.fun/coin/${encodeURIComponent(p.ca)}`;
   if (kind === "fomo") {
     state.plat.wait = true;
-    setPlatMsg("fomo", "在 FOMO 页按书签列的「持币」，回到这页按「粘贴名单」（或直接 Ctrl+V）");
+    state.plat.bmHint = true;
+    setPlatMsg("fomo", "在 FOMO 页按书签列的「持币」，回到这页按「粘贴」（或直接 Ctrl+V）；也可以直接按「抓名字」让插件读");
   }
   try {
     const opts = { url, active: true };

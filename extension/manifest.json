@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Wallet Scout",
   "short_name": "Wallet Scout",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "在 GMGN、DeBot、Ave 的币页标出哪些持有人在你本机的钱包库里（标签、实力等级、平台帐号、聪明钱信号）。只连你自己的本机服务。",
   "minimum_chrome_version": "116",
   "icons": {
